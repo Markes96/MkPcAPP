@@ -1,0 +1,25 @@
+# Build outputs
+build/
+out/
+bin/
+obj/
+
+# .NET
+sensor-bridge/**/bin/
+sensor-bridge/**/obj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+
+# OS cruft
+Thumbs.db
+.DS_Store

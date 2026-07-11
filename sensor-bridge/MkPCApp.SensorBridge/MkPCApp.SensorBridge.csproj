@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>MkPCApp.SensorBridge</AssemblyName>
+    <RootNamespace>MkPCApp.SensorBridge</RootNamespace>
+
+    <!-- Self-contained single-file publish: users never need the .NET runtime
+         installed separately, and the app never depends on a shared runtime being
+         present or the right version. -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- LibreHardwareMonitorLib expects some of its runtime files as loose
+         files next to the exe rather than bundled purely in-memory; without
+         this, single-file publish can silently leave sensors unavailable. -->
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+
+    <!-- No visible window; this process only writes to shared memory. -->
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pinned to 0.9.4 deliberately, NOT the latest stable: starting with
+         0.9.5, LibreHardwareMonitorLib requires a separately-installed
+         driver package (PawnIO, github.com/namazso/PawnIO) for CPU MSR reads
+         (CPU temperature) and embedded-controller reads (fan speeds) — it is
+         not bundled in the NuGet package and this app does not install it,
+         so those sensors silently fail even when run elevated. 0.9.4 uses
+         its own embedded driver instead and only needs admin rights, with no
+         separate install step. -->
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
+  </ItemGroup>
+
+</Project>
