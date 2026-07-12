@@ -26,6 +26,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case WM_POWERBROADCAST:
+            if (g_application) {
+                g_application->OnPowerBroadcast(wParam, lParam);
+            }
+            return TRUE;
+
         case WM_CLOSE:
             // Minimize to tray instead of exiting, unless RequestExit() posted
             // this WM_CLOSE itself (tray "Exit" menu item).

@@ -2,6 +2,8 @@
 #include "TrayIcon.h"
 #include "BridgeProcess.h"
 #include "../platform/DX11Renderer.h"
+#include "../profiles/AutomationEngine.h"
+#include "../profiles/ProfileManager.h"
 #include "../sensors/SensorAggregator.h"
 #include "../ui/TabManager.h"
 #include <windows.h>
@@ -24,6 +26,7 @@ public:
 
     void OnResize(UINT width, UINT height);
     void OnTrayMessage(HWND hwnd, WPARAM wParam, LPARAM lParam);
+    void OnPowerBroadcast(WPARAM wParam, LPARAM lParam);
 
     void Show();
     void HideToTray();
@@ -38,6 +41,8 @@ private:
     HWND hwnd_ = nullptr;
     platform::DX11Renderer renderer_;
     sensors::SensorAggregator aggregator_;
+    profiles::ProfileManager profileManager_;
+    profiles::AutomationEngine automationEngine_;
     ui::TabManager tabManager_;
     TrayIcon trayIcon_;
     BridgeProcess bridgeProcess_;

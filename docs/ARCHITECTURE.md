@@ -88,3 +88,28 @@ Navigation is a left icon sidebar (`ui::TabManager`, styled like an IDE
 `Application::Init` — no other app-shell code changes. Visual styling (dark
 VS Code-inspired palette, fonts, ImPlot colors) lives in `src/ui/Theme.h/.cpp`
 and applies globally, so new sections get it for free.
+
+## Perfiles module (`src/profiles/`)
+
+The "Perfiles" tab (`ui::PerfilesTab`) is the second section built on the
+`ITab` extension point above. It never touches Win32/WMI/COM directly —
+`profiles::ProfileManager` owns the 5 fixed predefined profiles plus loaded
+custom ones and the "which profile is active" state, `profiles::AutomationEngine`
+owns the ordered, priority-evaluated rule list (time window / battery
+threshold / power-source change), and both delegate all actual system
+changes to narrow `profiles::SystemControl::*` wrappers (one per variable:
+power plan, timeouts, brightness, volume, screen-off). Each
+wrapper returns `ApplyResult{Ok, Unsupported, Failed}`
+instead of a bare bool, so a profile apply can report exactly which variable
+didn't take effect without blocking the rest — the same "degrade visibly,
+never crash" principle the sensor code already follows for missing fan
+sensors. Custom profiles and automation rules persist to
+`%LOCALAPPDATA%\MkPCApp\profiles.json` via a small schema-specific
+JSON reader/writer (`src/profiles/ProfileJson.*`) rather than a vendored
+library — the file's shape is fixed and shallow enough that a general JSON
+parser wasn't worth the dependency. `AutomationEngine::Tick()` reuses the
+existing 1 Hz data-tick thread rather than spawning a second one, and also
+reacts immediately to `WM_POWERBROADCAST` for power-source-change rules.
+Night Light and Focus Assist were both deliberately left out: neither has a
+public Win32 API, and both would have depended on writing an undocumented,
+per-Windows-build registry blob format — see `docs/PROJECT_STATUS.md`.

@@ -17,7 +17,101 @@
    "bug encontrado y arreglado": una vez corregido, describe el comportamiento
    actual, no la historia de cómo estaba roto.
 
-## Iteración 1 — Base de la app + Monitor de Hardware (estable)
+## Iteración 2 — Sección "Perfiles": perfiles de rendimiento + automatización (en PR, pendiente de fusionar a main)
+
+Añade una segunda sección (`ui::PerfilesTab`, registrada junto a
+`HardwareMonitorTab` sin tocar el resto del shell) que agrupa varios ajustes
+de Windows en "perfiles" aplicables de un clic, más automatización simple por
+horario/batería/fuente de alimentación. Desarrollada en la rama
+`feature/perfiles-rendimiento` (PR #1 contra `main`) y probada en la máquina
+real del usuario, que es donde se compila y ejecuta la app.
+
+### Qué hace
+
+- **Variables que un perfil puede fijar**: plan de energía de Windows
+  (Ahorro/Equilibrado/Alto rendimiento/Máximo rendimiento), tiempos de
+  apagado de pantalla, de suspensión y de hibernación (con corriente y con
+  batería, editados en minutos en el editor de perfil aunque se guardan como
+  segundos internamente — API de Windows), brillo
+  (una sola variable, unificada: se aplica automáticamente al panel interno
+  vía WMI y/o a los monitores externos compatibles con DDC/CI que se
+  detecten, sin que el usuario tenga que distinguir el caso). Volumen es
+  variable **anulable**: lleva su propia casilla "¿modificar?", desmarcada
+  por defecto, para que un perfil de rendimiento no toque de rebote algo que
+  no tiene que ver.
+- **5 perfiles predefinidos** (Rendimiento, Equilibrado, Ahorro de batería,
+  Silencio/Noche, Presentación/Multimedia) — fijos, no editables ni
+  borrables, marcados con `[bloqueado]` en su tarjeta.
+- **Perfiles personalizados** ilimitados, con editor modal (todas las
+  variables prerellenadas con valores por defecto), editar/borrar por
+  tarjeta.
+- **Automatización**: lista ordenada de reglas (franja horaria con opción
+  "solo entre semana", batería por debajo de un umbral, cambio de fuente de
+  alimentación AC↔batería), cada una con checkbox de activar/desactivar y
+  reordenable arrastrando con el ratón — el orden de arriba a abajo decide
+  qué regla gana si varias coinciden a la vez (primera que aplica, gana).
+- **Botón "Apagar pantalla ahora"**, siempre visible, independiente del
+  perfil activo (`SC_MONITORPOWER`, no bloquea sesión ni suspende).
+- **Reconciliación al arrancar**: primero evalúa las reglas de
+  automatización contra el momento actual; si ninguna aplica, compara el
+  estado real de Windows contra cada perfil definido y marca como activo el
+  primero que coincide exactamente (brillo con tolerancia ±2%; variables
+  anulables desmarcadas o ilegibles se excluyen de la comparación). Si no
+  coincide con ninguno, muestra "Sin perfil activo (config. personalizada
+  detectada)" — nunca aplica nada de forma no solicitada.
+- Persistencia de perfiles personalizados y reglas en
+  `%LOCALAPPDATA%\MkPCApp\profiles.json`, con un lector/escritor JSON propio
+  y minimalista (`src/profiles/ProfileJson.*`) en vez de una librería de
+  terceros — el formato que necesita este archivo es lo bastante simple
+  (objetos planos, sin anidamiento profundo) para no justificar vendorizar
+  una dependencia nueva.
+
+### Limitaciones conocidas / mejor esfuerzo
+
+- **Luz nocturna y Asistente de enfoque no están soportados, a propósito**:
+  ninguno de los dos tiene API pública de Windows; solo son controlables
+  escribiendo un blob de registro no documentado ("CloudStore") cuyo layout
+  exacto varía según build de Windows/cuenta de usuario, así que no hay forma
+  fiable de implementarlos. No existe ningún código para ellos en la app. Si
+  Microsoft publica algún día una API pública para cualquiera de las dos, se
+  puede añadir.
+- **Brillo de monitor externo** depende de que el monitor soporte DDC/CI (más
+  fiable por DisplayPort que por HDMI) — si no responde ningún monitor ni hay
+  panel interno, se reporta "no disponible".
+- **"Máximo rendimiento"** está oculto por defecto en la mayoría de
+  instalaciones de Windows; se intenta duplicar automáticamente
+  (`PowerDuplicateScheme`) y, si falla, se aplica "Alto rendimiento" en su
+  lugar sin bloquear el resto del perfil.
+- Los GUID de subgrupo/ajuste de energía usados para leer/escribir timeouts
+  (`src/profiles/SystemControl/PowerTimeouts.cpp`: pantalla, suspensión e
+  hibernación) están confirmados contra un volcado real de `powercfg /q` —
+  ver `docs/POWER_GUIDS.md`, que también guarda el volcado completo por si
+  hace falta añadir alguna otra variable de energía en el futuro.
+
+### Arquitectura (resumen)
+
+Nuevo módulo `src/profiles/` (datos puros en `ProfileTypes.h`, persistencia en
+`ProfileStore`/`ProfileJson`, orquestación en `ProfileManager` y
+`AutomationEngine`, acceso a Windows en `SystemControl/*`) más
+`src/ui/PerfilesTab` (+ `ProfileEditorDialog`/`RuleEditorDialog`), siguiendo
+el mismo patrón de extensión por `ITab` que ya usa el monitor de hardware —
+ningún otro código del shell cambia salvo el registro de la nueva pestaña en
+`Application::Init`. El motor de automatización reutiliza el hilo de 1 Hz ya
+existente (`Application::DataTickLoop`) en vez de crear un hilo nuevo, y
+reacciona también de inmediato a `WM_POWERBROADCAST` (cambio de fuente de
+alimentación) sin esperar al siguiente tick.
+
+### Verificación pendiente (requiere máquina Windows real)
+
+Compila y se ha probado en la máquina real del usuario: los perfiles
+predefinidos aplican sus valores, crear/editar perfiles personalizados
+funciona, y crear una regla de automatización (incluyendo apuntar a un
+perfil personalizado) funciona. Queda por confirmar todavía: que la
+detección de perfil activo al arrancar acierta en los tres casos (regla de
+automatización activa, coincidencia exacta con un perfil, sin coincidencia
+ninguna), y que arrastrar una regla para reordenarla persiste correctamente.
+
+## Iteración 1 — Base de la app + Monitor de Hardware (estable, `v1.0.0` en `main`)
 
 Considerada estable: todas las funcionalidades pedidas para esta iteración están
 implementadas y el usuario ha confirmado en su máquina que el monitor de
@@ -131,11 +225,7 @@ empaquetar e instalar PawnIO (fuera del alcance actual).
   manifiesto (`requireAdministrator`), así que Windows muestra el diálogo de
   UAC en cada arranque; no hay forma de evitarlo sin dejar de requerir
   elevación. Necesario porque la temperatura de CPU y los ventiladores solo
-  son accesibles con permisos de administrador. Esto se probó una vez antes
-  (con LibreHardwareMonitorLib en 0.9.6) y pareció romper esos mismos
-  sensores — pero la causa real era la versión de la librería (ver sección de
-  PawnIO arriba), no el manifiesto; pendiente de confirmar en la máquina del
-  usuario que la elevación forzada funciona bien ahora con la 0.9.4.
+  son accesibles con permisos de administrador.
 - **Aviso sobre el autoarranque**: como la app exige admin siempre, si se
   activa "Iniciar con Windows" es probable que Windows muestre el UAC (o,
   según la configuración del sistema, no la lance en absoluto) en cada inicio
@@ -143,25 +233,18 @@ empaquetar e instalar PawnIO (fuera del alcance actual).
   (requeriría una tarea programada con "ejecutar con los privilegios más
   altos" en vez del registro `HKCU\...\Run` actual).
 
-### Verificación pendiente (requiere máquina Windows real)
+### Desarrollo desde Linux
 
-El desarrollo se hace desde un entorno Linux (sin MSVC/Windows SDK), así que
-la build nativa nunca se compila ni se ejecuta desde aquí — todas las pruebas
-reales las hace el usuario en su propio Windows. Falta confirmar todavía:
-
-- Que el manifiesto `requireAdministrator` fuerza el UAC correctamente con la
-  0.9.4 y que la temperatura de CPU/ventiladores siguen funcionando (la vez
-  anterior que se probó esto fue con la 0.9.6, ya descartada como causa del
-  problema de entonces).
-- Que la instancia única localiza y enfoca la ventana existente correctamente
-  en todos los casos (minimizada en bandeja, minimizada en la barra de tareas),
-  y que no interfiere con relanzar la app ya elevada tras cerrar una instancia
-  previa sin elevar.
-- Huella de CPU/RAM en reposo (minimizada) durante un periodo prolongado.
-
-(Lo único verificado desde Linux en cada cambio: que `sensor-bridge` compila y
-publica sin errores para `win-x64` con `dotnet publish`; el lado nativo C++ se
-revisa manualmente línea a línea ya que no se puede compilar aquí.)
+El desarrollo se hace desde un entorno Linux (sin MSVC/Windows SDK): la build
+nativa nunca se compila ni se ejecuta desde aquí, y el lado C++ se revisa
+manualmente línea a línea. Todas las pruebas reales (compilación con MSVC,
+ejecución, UAC, sensores) las hace el usuario en su propia máquina Windows.
+Lo único que sí se verifica desde Linux en cada cambio es que `sensor-bridge`
+compila y publica sin errores para `win-x64` con `dotnet publish`. Aspectos
+menores aún sin probar exhaustivamente (no bloquean el estado "estable"):
+huella de CPU/RAM en reposo (minimizada) durante un periodo prolongado, y que
+la instancia única enfoque correctamente la ventana existente en todas las
+combinaciones de estado (minimizada en bandeja vs. en la barra de tareas).
 
 ### Revisión de seguridad/estabilidad del sistema
 

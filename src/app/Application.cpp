@@ -1,6 +1,7 @@
 #include "Application.h"
 #include "AutoStart.h"
 #include "../ui/HardwareMonitorTab.h"
+#include "../ui/PerfilesTab.h"
 #include "../ui/Theme.h"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -37,6 +38,11 @@ bool Application::Init(HWND hwnd, HINSTANCE /*instance*/) {
     ImGui_ImplDX11_Init(renderer_.Device(), renderer_.Context());
 
     tabManager_.RegisterTab(std::make_unique<ui::HardwareMonitorTab>(aggregator_));
+
+    profileManager_.Init();
+    automationEngine_.Init(profileManager_);
+    profileManager_.ReconcileOnStartup(&automationEngine_);
+    tabManager_.RegisterTab(std::make_unique<ui::PerfilesTab>(profileManager_, automationEngine_, hwnd_));
 
     TrayIcon::Callbacks callbacks;
     callbacks.onOpen = [this]() { Show(); };
@@ -96,6 +102,12 @@ void Application::OnTrayMessage(HWND hwnd, WPARAM wParam, LPARAM lParam) {
     trayIcon_.HandleMessage(hwnd, wParam, lParam);
 }
 
+void Application::OnPowerBroadcast(WPARAM /*wParam*/, LPARAM /*lParam*/) {
+    // React immediately to a power-source change (AC<->battery) rather than
+    // waiting up to 1s for the next DataTickLoop tick.
+    automationEngine_.OnPowerSourceChangeHint();
+}
+
 void Application::Show() {
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
@@ -134,6 +146,7 @@ void Application::DataTickLoop() {
         }
         aggregator_.Tick();
         tabManager_.OnTick(GetTickCount64());
+        automationEngine_.Tick();
     }
 
     CloseHandle(timer);
