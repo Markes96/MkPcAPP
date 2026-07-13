@@ -2,6 +2,7 @@
 #include "AutoStart.h"
 #include "../ui/HardwareMonitorTab.h"
 #include "../ui/PerfilesTab.h"
+#include "../ui/StartupTab.h"
 #include "../ui/Theme.h"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -43,6 +44,7 @@ bool Application::Init(HWND hwnd, HINSTANCE /*instance*/) {
     automationEngine_.Init(profileManager_);
     profileManager_.ReconcileOnStartup(&automationEngine_);
     tabManager_.RegisterTab(std::make_unique<ui::PerfilesTab>(profileManager_, automationEngine_, hwnd_));
+    tabManager_.RegisterTab(std::make_unique<ui::StartupTab>(hwnd_, renderer_));
 
     TrayIcon::Callbacks callbacks;
     callbacks.onOpen = [this]() { Show(); };

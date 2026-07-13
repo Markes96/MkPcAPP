@@ -5,8 +5,8 @@
 #include "SystemControl/PowerTimeouts.h"
 #include "SystemControl/DisplayBrightness.h"
 #include "SystemControl/Volume.h"
+#include "../platform/ComScope.h"
 #include <windows.h>
-#include <combaseapi.h>
 #include <algorithm>
 #include <cstdio>
 
@@ -14,34 +14,7 @@ namespace profiles {
 
 namespace {
 
-// Brackets a single ApplyProfile/DetectCurrentProfile call with exactly one
-// CoInitializeEx/CoUninitialize pair, instead of each SystemControl function
-// doing its own — those are called several times per Apply/Detect and
-// shouldn't repeatedly init/uninit COM on the same thread.
-class ComScope {
-public:
-    ComScope() {
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        // S_FALSE means COM was already initialized on this thread (by us or
-        // someone else) in a compatible mode — still must be paired with a
-        // CoUninitialize call. RPC_E_CHANGED_MODE means a different
-        // concurrency model is already set on this thread (e.g. by ImGui/DX11
-        // internals) — our call didn't take effect, so don't uninitialize.
-        shouldUninitialize_ = (hr == S_OK || hr == S_FALSE);
-    }
-
-    ~ComScope() {
-        if (shouldUninitialize_) {
-            CoUninitialize();
-        }
-    }
-
-    ComScope(const ComScope&) = delete;
-    ComScope& operator=(const ComScope&) = delete;
-
-private:
-    bool shouldUninitialize_ = false;
-};
+using platform::ComScope;
 
 // Shared by ApplyProfile/DetectCurrentProfile for Overridable<T> variables
 // (currently just volume), which follow the "only touch it if apply==true"
@@ -139,6 +112,10 @@ std::vector<AppliedVariableResult> ProfileManager::ApplyProfile(const std::strin
     }
 
     std::vector<AppliedVariableResult> results;
+    // Brackets this whole apply cycle with exactly one CoInitializeEx/
+    // CoUninitialize pair, instead of each SystemControl function doing its
+    // own -- those are called several times per Apply/Detect and shouldn't
+    // repeatedly init/uninit COM on the same thread.
     ComScope comScope;
 
     results.push_back({"powerPlan", PowerPlanControl::SetActiveScheme(vars.powerPlan)});

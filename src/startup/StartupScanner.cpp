@@ -1,0 +1,115 @@
+#include "StartupScanner.h"
+#include "ShortcutStartupControl.h"
+#include "../platform/ComScope.h"
+#include "../platform/StringConvert.h"
+#include <algorithm>
+
+namespace startup {
+
+namespace {
+
+using platform::ComScope;
+using platform::Utf8ToWide;
+
+std::wstring QuoteIfNeeded(const std::wstring& path) {
+    if (path.empty() || path.front() == L'"') {
+        return path;
+    }
+    if (path.find(L' ') != std::wstring::npos) {
+        return L"\"" + path + L"\"";
+    }
+    return path;
+}
+
+} // namespace
+
+ScanResult StartupScanner::Scan() {
+    ScanResult result;
+    // ShortcutStartupControl needs COM (IShellLink) for the whole scan, not
+    // per-call -- bracket it once here rather than per shortcut resolved.
+    ComScope comScope;
+
+    std::vector<StartupEntry> all = RegistryStartupControl::EnumerateHkcuRun();
+    std::vector<StartupEntry> hklm = RegistryStartupControl::EnumerateHklmRun();
+    std::vector<StartupEntry> userFolder = ShortcutStartupControl::EnumerateUserStartupFolder();
+    std::vector<StartupEntry> commonFolder = ShortcutStartupControl::EnumerateCommonStartupFolder();
+    all.insert(all.end(), hklm.begin(), hklm.end());
+    all.insert(all.end(), userFolder.begin(), userFolder.end());
+    all.insert(all.end(), commonFolder.begin(), commonFolder.end());
+
+    // signatureVerifier_/manuallyAddedValueNames_ are the only state shared
+    // with the main-thread SetEnabled/AddManualEntry/DeleteManualEntry calls
+    // -- lock only around touching those, not around the registry/
+    // filesystem enumeration itself (which is this function's slow part and
+    // doesn't touch shared state).
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : all) {
+        bool isMicrosoft = false;
+        if (!entry.targetMissing && !entry.resolvedExePath.empty()) {
+            isMicrosoft = signatureVerifier_.IsMicrosoftSigned(Utf8ToWide(entry.resolvedExePath));
+        }
+        if (isMicrosoft) {
+            continue; // excluded entirely, never just greyed out
+        }
+
+        if (entry.source == StartupSource::RegistryHkcuRun &&
+            std::find(manuallyAddedValueNames_.begin(), manuallyAddedValueNames_.end(),
+                      entry.registryValueName) != manuallyAddedValueNames_.end()) {
+            entry.deletable = true;
+        }
+
+        result.entries.push_back(std::move(entry));
+    }
+
+    return result;
+}
+
+bool StartupScanner::SetEnabled(StartupEntry& entry, bool enabled) {
+    bool succeeded = false;
+    switch (entry.source) {
+        case StartupSource::RegistryHkcuRun:
+            succeeded = RegistryStartupControl::SetApprovedEnabled(HKEY_CURRENT_USER, entry.registryValueName,
+                                                                      entry.isWow6432, enabled);
+            break;
+        case StartupSource::RegistryHklmRun:
+            succeeded = RegistryStartupControl::SetApprovedEnabled(HKEY_LOCAL_MACHINE, entry.registryValueName,
+                                                                      entry.isWow6432, enabled);
+            break;
+        case StartupSource::StartupFolderUser:
+        case StartupSource::StartupFolderCommon:
+            // SetShortcutEnabled updates entry.enabled itself on success.
+            return ShortcutStartupControl::SetShortcutEnabled(entry, enabled);
+    }
+    if (succeeded) {
+        entry.enabled = enabled;
+    }
+    return succeeded;
+}
+
+RegistryStartupControl::AddResult StartupScanner::AddManualEntry(const std::wstring& displayName,
+                                                                    const std::wstring& exePath) {
+    RegistryStartupControl::AddResult addResult =
+        RegistryStartupControl::AddUserRunEntry(displayName, QuoteIfNeeded(exePath));
+    if (addResult == RegistryStartupControl::AddResult::Ok) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        manuallyAddedValueNames_.push_back(displayName);
+    }
+    return addResult;
+}
+
+bool StartupScanner::DeleteManualEntry(const StartupEntry& entry) {
+    if (!entry.deletable || entry.source != StartupSource::RegistryHkcuRun) {
+        return false;
+    }
+    bool deleted = RegistryStartupControl::DeleteUserRunEntry(entry.registryValueName);
+    if (deleted) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        manuallyAddedValueNames_.erase(
+            std::remove(manuallyAddedValueNames_.begin(), manuallyAddedValueNames_.end(),
+                        entry.registryValueName),
+            manuallyAddedValueNames_.end());
+    }
+    return deleted;
+}
+
+} // namespace startup

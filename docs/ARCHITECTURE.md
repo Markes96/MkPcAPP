@@ -113,3 +113,65 @@ reacts immediately to `WM_POWERBROADCAST` for power-source-change rules.
 Night Light and Focus Assist were both deliberately left out: neither has a
 public Win32 API, and both would have depended on writing an undocumented,
 per-Windows-build registry blob format — see `docs/PROJECT_STATUS.md`.
+
+## Startup module (`src/startup/`)
+
+The "Inicio" tab (`ui::StartupTab`) is the third section built on the `ITab`
+extension point above. Same split-responsibility shape as `src/profiles/`:
+`startup::StartupScanner` orchestrates, and two narrow per-facility control
+modules do the actual Win32 work —
+`startup::RegistryStartupControl` (Registry `Run` keys, both HKCU and HKLM
+plus the WOW6432Node mirror) and `startup::ShortcutStartupControl` (Startup-
+folder `.lnk` shortcuts, resolved via `IShellLinkW`/`IPersistFile`). Neither
+tool ever deletes a Run value or a shortcut file when the user "removes" an
+entry — see "why disable, not delete" below.
+
+**StartupApproved byte format.** Windows itself (Explorer/Task Manager)
+tracks each Run entry's enabled/disabled state in a sibling `REG_BINARY`
+value under `...\Explorer\StartupApproved\Run`, named identically to the
+Run value it applies to: byte 0 is `0x02`/`0x03` for disabled, `0x06`/`0x07`
+(or the value simply being absent) for enabled. This isn't a Microsoft-
+documented format, but it's stable and exactly what Task Manager itself
+reads and writes — `RegistryStartupControl.cpp` preserves any existing blob
+and only flips that one byte, rather than reconstructing it from scratch,
+so nothing Explorer might also read from the same value gets disturbed.
+
+**Why disable, not delete.** Every "remove" action in this tab is reversible
+with one click: Registry entries get their StartupApproved flag flipped
+(the Run value itself is never touched), and Startup-folder shortcuts get
+moved into a `Disabled` subfolder next to their original location (never
+deleted). This matches Windows' own Task Manager behavior and the app's
+existing "no destructive operations" security posture (see
+`docs/PROJECT_STATUS.md`). The only real delete path is
+`StartupScanner::DeleteManualEntry`, and it only ever applies to entries
+this same app session created via `AddManualEntry` — never to a
+pre-existing entry the user didn't add through this tool.
+
+**Microsoft-signature filtering.** `startup::SignatureVerifier` calls
+`WinVerifyTrust` (Authenticode) on each entry's resolved executable, and if
+trusted, inspects the signer's certificate subject
+(`CryptQueryObject`/`CertGetNameStringW`) for "Microsoft Windows" or
+"Microsoft Corporation". A match excludes the entry from the UI entirely —
+this is how the app guarantees a user can never accidentally disable a core
+Windows component through this tool, without maintaining a manual exclusion
+list. Any verification failure (unsigned, corrupt PE, access error) is
+treated as "not Microsoft" so an entry is never hidden by mistake. Verdicts
+are cached in memory per `(path, last-write-time)`, owned by the
+`StartupScanner` instance, so a rescan doesn't repeat `WinVerifyTrust` on
+every unchanged executable.
+
+**Icon rendering.** `startup::IconExtractor` is pure Win32/GDI
+(`ExtractIconExW`/`GetDIBits`) producing a plain RGBA bitmap, with no D3D or
+ImGui knowledge — kept separate so it's reviewable independent of
+rendering. `platform::IconTextureCache` (in `src/platform/`, not folded
+into `DX11Renderer`) uploads that bitmap to an immutable D3D11 texture and
+caches the resulting `ID3D11ShaderResourceView*` per resolved exe path, so a
+card's icon isn't re-extracted/re-uploaded every frame. It's deliberately
+its own small class rather than living on `DX11Renderer` itself, so the
+generic renderer stays free of any one feature's state. Texture
+creation only ever happens from `StartupTab::OnRender` (the render thread,
+which owns the D3D11 device/context) — the registry/filesystem/signature
+scan itself runs on the existing 1 Hz data-tick thread
+(`StartupTab::OnTick`, every ~10 ticks) since it does no D3D calls; the two
+are kept strictly separate to avoid a second thread ever touching the D3D
+device.

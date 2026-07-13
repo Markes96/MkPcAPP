@@ -53,20 +53,30 @@ set(APP_SOURCES
     src/profiles/SystemControl/DisplayBrightness.cpp
     src/profiles/SystemControl/Volume.cpp
     src/profiles/SystemControl/ScreenControl.cpp
+    src/startup/RegistryStartupControl.cpp
+    src/startup/ShortcutStartupControl.cpp
+    src/startup/SignatureVerifier.cpp
+    src/startup/IconExtractor.cpp
+    src/startup/StartupScanner.cpp
     src/ui/TabManager.cpp
     src/ui/HardwareMonitorTab.cpp
     src/ui/PerfilesTab.cpp
     src/ui/ProfileEditorDialog.cpp
     src/ui/RuleEditorDialog.cpp
+    src/ui/CardWidgets.cpp
+    src/ui/StartupTab.cpp
+    src/ui/AddStartupEntryDialog.cpp
     src/ui/Theme.cpp
     src/platform/DX11Renderer.cpp
+    src/platform/IconTextureCache.cpp
     src/platform/WndProc.cpp
 )
 
 add_executable(MkPCApp WIN32 ${APP_SOURCES})
 target_include_directories(MkPCApp PRIVATE src)
 target_link_libraries(MkPCApp PRIVATE imgui implot d3d11 dxgi shell32 iphlpapi advapi32
-                                        PowrProf dxva2 ole32 oleaut32 wbemuuid)
+                                        PowrProf dxva2 ole32 oleaut32 wbemuuid
+                                        wintrust crypt32 shlwapi gdi32 uuid)
 target_compile_definitions(MkPCApp PRIVATE UNICODE _UNICODE NOMINMAX)
 
 # Always request administrator elevation: full sensor access (CPU temperature,

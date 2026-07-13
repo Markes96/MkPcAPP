@@ -1,5 +1,6 @@
 #include "PerfilesTab.h"
 #include "Theme.h"
+#include "CardWidgets.h"
 #include "../profiles/SystemControl/ScreenControl.h"
 #include <imgui.h>
 #include <cstdio>
@@ -10,25 +11,8 @@ namespace ui {
 
 namespace {
 
-constexpr float kCardWidth = 160.0f;
 constexpr float kCardHeight = 110.0f;
 constexpr float kCardPadding = 10.0f;
-
-// Centers a single line of text horizontally within the current content
-// region (falls back to left-aligned if it doesn't fit, e.g. a long custom
-// profile name at a narrow card width).
-void CenteredText(const char* text, bool disabled = false) {
-    float availWidth = ImGui::GetContentRegionAvail().x;
-    float textWidth = ImGui::CalcTextSize(text).x;
-    if (textWidth < availWidth) {
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availWidth - textWidth) * 0.5f);
-    }
-    if (disabled) {
-        ImGui::TextDisabled("%s", text);
-    } else {
-        ImGui::TextUnformatted(text);
-    }
-}
 
 // Same as CenteredText, but wraps instead of overflowing when the text is
 // too wide to fit on one line -- used for profile names, which are short
@@ -52,40 +36,6 @@ void CenteredProfileName(const std::string& name) {
     } else {
         ImGui::TextWrapped("%s", name.c_str());
     }
-}
-
-// Blue "+" button (Visual Studio accent style) used to open the create
-// dialog for both the Perfiles and Automatizacion sections, vertically
-// centered against the section's larger/bold header font instead of just
-// sharing the header's line top (which looks misaligned when the two items
-// have different heights).
-bool RenderSectionHeaderAddButton(const char* headerText) {
-    if (Theme::g_fonts.value) {
-        ImGui::PushFont(Theme::g_fonts.value);
-    }
-    ImGui::TextUnformatted(headerText);
-    float headerHeight = ImGui::GetItemRectSize().y;
-    if (Theme::g_fonts.value) {
-        ImGui::PopFont();
-    }
-
-    ImGui::SameLine();
-    // SmallButton forces FramePadding.y to 0 internally, so its real height
-    // is just the text line height -- GetFrameHeight() (which assumes the
-    // style's normal, non-zero FramePadding) overstates it and under-shifts
-    // the button, leaving it sitting above center against the header text.
-    float offset = (headerHeight - ImGui::GetTextLineHeight()) * 0.5f;
-    if (offset > 0.0f) {
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset);
-    }
-
-    ImGui::PushStyleColor(ImGuiCol_Button, Theme::kAccent);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::kAccentHover);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Theme::kAccentHover);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    bool clicked = ImGui::SmallButton("+");
-    ImGui::PopStyleColor(4);
-    return clicked;
 }
 
 const char* VariableDisplayName(const std::string& variableName) {

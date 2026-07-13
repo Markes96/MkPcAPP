@@ -17,6 +17,90 @@
    "bug encontrado y arreglado": una vez corregido, describe el comportamiento
    actual, no la historia de cómo estaba roto.
 
+## Iteración 3 — Sección "Inicio": gestor de programas de arranque (en desarrollo, rama `feature/gestor-inicio`)
+
+Añade una tercera sección (`ui::StartupTab`, registrada junto a
+`HardwareMonitorTab` y `PerfilesTab` sin tocar el resto del shell) para ver,
+activar/desactivar y añadir manualmente programas de terceros que arrancan
+con Windows — con el mismo espíritu "no apto para torpes" del resto de la
+app: nunca se puede tocar nada crítico del propio Windows, y quitar una
+entrada nunca la borra, siempre es reversible con un clic.
+
+### Qué hace
+
+- **Fuentes enumeradas**: `Run` del Registro en HKCU y HKLM (incluyendo el
+  espejo `WOW6432Node` en Windows de 64 bits), más accesos directos en la
+  carpeta "Inicio" del usuario actual y en la de todos los usuarios. Fuera de
+  alcance deliberadamente: Tareas Programadas.
+- **Quitar = deshabilitar, no borrar**, igual que el Administrador de tareas
+  de Windows: para el Registro, se marca el flag de estado en
+  `...\Explorer\StartupApproved\Run` (mismo formato de bytes que usa el
+  propio Explorer/Task Manager) sin tocar el valor `Run`; para accesos
+  directos, se mueve el `.lnk` a una subcarpeta `Disabled` junto a la carpeta
+  "Inicio" en vez de borrarlo. Reversible con un clic en ambos casos.
+- **Filtro de apps de Microsoft**: cualquier ejecutable firmado por
+  Microsoft (comprobado vía `WinVerifyTrust`/Authenticode) se excluye por
+  completo de la lista — nunca se muestra ni bloqueado, directamente no
+  aparece. Cualquier fallo de verificación (archivo sin firmar, corrupto, o
+  error de comprobación) se trata como "no es de Microsoft" y la entrada se
+  muestra, para no arriesgarse a ocultar algo por error.
+- **Icono real por tarjeta**, extraído del propio `.exe` (o del destino
+  resuelto del acceso directo); si la extracción falla o el archivo de
+  destino ya no existe, se muestra un placeholder en vez de nada o un icono
+  roto.
+- **Añadir manualmente**: botón "+" abre un selector de archivo nativo
+  filtrado a `.exe`; la entrada nueva siempre se crea en
+  `HKCU\...\Run` (nunca en HKLM), con nombre editable. Solo las entradas
+  añadidas así en la sesión actual de la app muestran un botón "Quitar"
+  (borrado real); el resto de entradas son solo activar/desactivar.
+- Rescan completo cada ~10 segundos (no cada segundo) para no repetir
+  verificación de firma/registro con demasiada frecuencia; el icono y el
+  estado de la entrada se actualizan al vuelo tras cada acción del usuario
+  sin esperar al siguiente rescan.
+
+### Limitaciones conocidas / mejor esfuerzo
+
+- **Tras reiniciar la app, una entrada añadida manualmente deja de ser
+  distinguible** de cualquier otra entrada `HKCU\...\Run` ya existente, y
+  pasa a mostrarse solo con activar/desactivar (pierde el botón "Quitar").
+  Aceptado deliberadamente: no se persiste "qué se añadió manualmente" en
+  disco (ver más abajo), y desactivar sigue disponible en todo momento, así
+  que no es una regresión funcional real, solo una diferencia de UI tras
+  reiniciar.
+- **Sin persistencia JSON nueva**: el Registro/sistema de archivos ya es la
+  fuente de verdad de qué arranca con Windows; las cachés de firma
+  (`SignatureVerifier`) y de textura de icono (`platform::IconTextureCache`)
+  viven solo en memoria y se reconstruyen en cada arranque de la app —
+  comprobar de nuevo un par de docenas de ejecutables una vez por sesión es
+  barato.
+
+### Arquitectura (resumen)
+
+Nuevo módulo `src/startup/` (tipos puros en `StartupTypes.h`, control de
+Registro en `RegistryStartupControl`, control de accesos directos en
+`ShortcutStartupControl`, verificación de firma en `SignatureVerifier`,
+extracción de icono en `IconExtractor`, orquestación en `StartupScanner`)
+más `src/ui/StartupTab` (+ `AddStartupEntryDialog`) y
+`src/platform/IconTextureCache` (sube bitmaps de icono a texturas D3D11,
+separado de `DX11Renderer` para no acoplar el renderer genérico a esta
+funcionalidad), siguiendo el mismo patrón de extensión por `ITab` que ya
+usan Hardware Monitor y Perfiles. El escaneo completo (Registro + carpetas +
+verificación de firma) corre en el hilo de datos a 1 Hz ya existente, cada
+~10 ticks; la creación de texturas de icono ocurre solo en el hilo de
+render, nunca en el de datos.
+
+### Verificación pendiente (requiere máquina Windows real)
+
+Aún sin probar en la máquina real del usuario: compilación y enlazado con
+las nuevas librerías COM/`wintrust`/`crypt32`/`gdi32`; que `WinVerifyTrust`
+identifica correctamente binarios reales firmados por Microsoft y los
+excluye; ida y vuelta con el Administrador de tareas de Windows al
+deshabilitar/habilitar una entrada; extracción de icono en una muestra real
+de apps de arranque instaladas; que el selector nativo de archivo abre y
+devuelve ruta correctamente; y que mover accesos directos entre la carpeta
+"Inicio" y su subcarpeta `Disabled` funciona con los permisos NTFS reales de
+la máquina, en ambas carpetas (usuario y todos los usuarios).
+
 ## Iteración 2 — Sección "Perfiles": perfiles de rendimiento + automatización (en PR, pendiente de fusionar a main)
 
 Añade una segunda sección (`ui::PerfilesTab`, registrada junto a
@@ -249,8 +333,14 @@ combinaciones de estado (minimizada en bandeja vs. en la barra de tareas).
 ### Revisión de seguridad/estabilidad del sistema
 
 La app no realiza operaciones destructivas: no hay formateo de discos, borrado
-de archivos, instalación de servicios/tareas programadas, ni escritura fuera de
-`HKCU` (autoarranque, reversible). La elevación es **obligatoria en cada
+de archivos, ni instalación de servicios/tareas programadas. La app escribe
+fuera de `HKCU` en un solo caso, introducido por la sección "Inicio": al
+deshabilitar una entrada de arranque de todos los usuarios, escribe en
+`HKLM\...\Explorer\StartupApproved\Run` — el mismo flag de estado que ya usa
+el propio Administrador de tareas de Windows, nunca el valor `Run` en sí, y
+siempre reversible con un clic (ver Iteración 3). Fuera de ese caso, toda
+otra escritura de la app (autoarranque propio, perfiles) sigue limitada a
+`HKCU` y es reversible. La elevación es **obligatoria en cada
 arranque** (manifiesto `requireAdministrator`) — Windows sigue mostrando el
 diálogo de UAC estándar cada vez, así que sigue siendo un consentimiento
 explícito del usuario en el momento, no una elevación silenciosa oculta.
