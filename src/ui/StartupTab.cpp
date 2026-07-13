@@ -1,4 +1,5 @@
 #include "StartupTab.h"
+#include "CardWidgets.h"
 #include "../platform/StringConvert.h"
 #include <imgui.h>
 #include <shellapi.h>
