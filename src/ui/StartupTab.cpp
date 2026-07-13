@@ -1,14 +1,15 @@
 #include "StartupTab.h"
 #include "Theme.h"
 #include "CardWidgets.h"
+#include "../platform/StringConvert.h"
 #include <imgui.h>
+#include <shellapi.h>
 #include <mutex>
 
 namespace ui {
 
 namespace {
 
-constexpr float kCardHeight = 150.0f;
 constexpr float kIconSize = 32.0f;
 // Full rescan every 10 ticks (~10s at the app's 1Hz data-tick rate) rather
 // than every tick -- registry/filesystem enumeration plus signature checks
@@ -73,30 +74,34 @@ void StartupTab::OnRender(float /*deltaTimeSeconds*/) {
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
 
     {
-        // Held for the whole card loop rather than copied out and back:
-        // OnTick only needs this lock briefly, once every ~10 ticks, to swap
-        // in a freshly scanned result, so a render-thread hold for one
-        // frame is cheap contention, not a bottleneck -- and rendering
-        // straight from lastScan_.entries avoids an O(n) deep-copy of every
-        // entry's strings twice per frame for no reason.
+        // Held for the whole table loop rather than copied out and back:
+        // OnTick only needs this lock briefly, once every ~10 ticks, to
+        // swap in a freshly scanned result, so a render-thread hold for one
+        // frame is cheap contention, not a bottleneck.
         std::lock_guard<std::mutex> lock(scanMutex_);
 
         if (!hasScannedOnce_.load()) {
             ImGui::TextDisabled("Buscando programas de inicio...");
         } else if (lastScan_.entries.empty()) {
             ImGui::TextDisabled("No se ha encontrado ningun programa de terceros en el inicio de Windows.");
-        }
+        } else {
+            constexpr ImGuiTableFlags kTableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                                     ImGuiTableFlags_SizingStretchProp;
+            if (ImGui::BeginTable("StartupEntriesTable", 5, kTableFlags)) {
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, kIconSize + 8.0f);
+                ImGui::TableSetupColumn("Nombre");
+                ImGui::TableSetupColumn("Origen", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+                ImGui::TableSetupColumn("Activado", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn("Acciones", ImGuiTableColumnFlags_WidthFixed, 240.0f);
+                ImGui::TableHeadersRow();
 
-        for (size_t i = 0; i < lastScan_.entries.size();) {
-            bool removed = false;
-            RenderEntryCard(lastScan_.entries[i], removed);
-            if (removed) {
-                lastScan_.entries.erase(lastScan_.entries.begin() + i);
-            } else {
-                ++i;
+                for (auto& entry : lastScan_.entries) {
+                    RenderEntryRow(entry);
+                }
+
+                ImGui::EndTable();
             }
         }
-        ImGui::NewLine();
     }
 
     if (!lastErrorMessage_.empty()) {
@@ -105,11 +110,12 @@ void StartupTab::OnRender(float /*deltaTimeSeconds*/) {
     }
 
     addDialog_.Render(scanner_);
+    confirmDeleteDialog_.Render(scanner_);
 
-    if (addDialog_.ConsumeJustSaved()) {
+    if (addDialog_.ConsumeJustSaved() || confirmDeleteDialog_.ConsumeJustDeleted()) {
         // Immediate rescan (one-off, user-triggered, off the hot path) so
-        // the newly added entry shows up right away instead of waiting up
-        // to kRescanEveryNTicks ticks for the next background rescan.
+        // an add/delete shows up right away instead of waiting up to
+        // kRescanEveryNTicks ticks for the next background rescan.
         startup::ScanResult freshScan = scanner_.Scan();
         std::lock_guard<std::mutex> lock(scanMutex_);
         lastScan_ = std::move(freshScan);
@@ -117,57 +123,35 @@ void StartupTab::OnRender(float /*deltaTimeSeconds*/) {
     }
 }
 
-void StartupTab::RenderEntryCard(startup::StartupEntry& entry, bool& removed) {
-    removed = false;
-
+void StartupTab::RenderEntryRow(startup::StartupEntry& entry) {
     ImGui::PushID(entry.id.c_str());
-    ImGui::BeginGroup();
+    ImGui::TableNextRow();
 
-    ImVec2 cardMin = ImGui::GetCursorScreenPos();
-    ImVec2 cardMax = ImVec2(cardMin.x + kCardWidth, cardMin.y + kCardHeight);
-    bool isHovered = ImGui::IsMouseHoveringRect(cardMin, cardMax);
+    bool hasTarget = !entry.targetMissing && !entry.resolvedExePath.empty();
 
-    int pushedColors = 0;
-    if (isHovered) {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(Theme::kAccentHover.x, Theme::kAccentHover.y,
-                                                         Theme::kAccentHover.z, 0.10f));
-        ImGui::PushStyleColor(ImGuiCol_Border, Theme::kAccentHover);
-        pushedColors = 2;
-    }
-
-    ImGui::BeginChild(entry.id.c_str(), ImVec2(kCardWidth, kCardHeight), ImGuiChildFlags_Borders,
-                       ImGuiWindowFlags_NoScrollbar);
-
-    ImGui::SetCursorPosX((kCardWidth - kIconSize) * 0.5f);
-    uint64_t textureId = (entry.targetMissing || entry.resolvedExePath.empty())
-                              ? 0
-                              : iconCache_.GetOrCreateTexture(entry.resolvedExePath);
+    ImGui::TableSetColumnIndex(0);
+    uint64_t textureId = hasTarget ? iconCache_.GetOrCreateTexture(entry.resolvedExePath) : 0;
     if (textureId != 0) {
         ImGui::Image(textureId, ImVec2(kIconSize, kIconSize));
     } else {
         RenderIconPlaceholder();
     }
 
-    if (Theme::g_fonts.body) {
-        ImGui::PushFont(Theme::g_fonts.body);
-    }
-    CenteredText(entry.displayName.c_str());
-    if (Theme::g_fonts.body) {
-        ImGui::PopFont();
-    }
-
-    CenteredText(SourceBadgeText(entry.source), /*disabled=*/true);
-    if (entry.targetMissing) {
-        CenteredText("(archivo no encontrado)", /*disabled=*/true);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(entry.displayName.c_str());
+    if (!hasTarget) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(archivo no encontrado)");
     }
 
-    ImGui::EndChild();
-    if (pushedColors > 0) {
-        ImGui::PopStyleColor(pushedColors);
-    }
+    ImGui::TableSetColumnIndex(2);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s", SourceBadgeText(entry.source));
 
+    ImGui::TableSetColumnIndex(3);
     bool enabledState = entry.enabled;
-    if (ImGui::Checkbox("Activado", &enabledState)) {
+    if (ImGui::Checkbox("##enabled", &enabledState)) {
         if (scanner_.SetEnabled(entry, enabledState)) {
             lastErrorMessage_.clear();
         } else {
@@ -175,24 +159,103 @@ void StartupTab::RenderEntryCard(startup::StartupEntry& entry, bool& removed) {
         }
     }
 
-    if (entry.deletable) {
-        if (ImGui::SmallButton("Quitar")) {
-            if (scanner_.DeleteManualEntry(entry)) {
-                removed = true;
-            } else {
-                lastErrorMessage_ = "No se pudo quitar \"" + entry.displayName + "\".";
-            }
+    ImGui::TableSetColumnIndex(4);
+
+    if (ImGui::SmallButton("i")) {
+        infoPopupEntryId_ = entry.id;
+        ImGui::OpenPopup("EntryInfoPopup");
+        if (hasTarget && infoCache_.find(entry.resolvedExePath) == infoCache_.end()) {
+            std::wstring widePath = platform::Utf8ToWide(entry.resolvedExePath);
+            EntryInfoCache cacheValue;
+            cacheValue.appInfo = startup::ReadAppInfo(widePath);
+            cacheValue.signatureInfo = scanner_.GetSignatureInfo(widePath);
+            infoCache_[entry.resolvedExePath] = std::move(cacheValue);
         }
     }
+    if (infoPopupEntryId_ == entry.id) {
+        RenderInfoPopup(entry);
+    }
 
-    ImGui::EndGroup();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!hasTarget);
+    if (ImGui::SmallButton("Abrir ubicacion")) {
+        OpenContainingFolder(entry);
+    }
+    ImGui::EndDisabled();
+    if (!hasTarget && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("El archivo ya no existe.");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Eliminar")) {
+        confirmDeleteDialog_.OpenForEntry(entry);
+    }
+
     ImGui::PopID();
+}
 
-    float windowVisibleX2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    float lastItemX2 = ImGui::GetItemRectMax().x;
-    float nextItemX2 = lastItemX2 + ImGui::GetStyle().ItemSpacing.x + kCardWidth;
-    if (nextItemX2 < windowVisibleX2) {
-        ImGui::SameLine();
+void StartupTab::RenderInfoPopup(const startup::StartupEntry& entry) {
+    if (ImGui::BeginPopup("EntryInfoPopup")) {
+        RenderInfoContent(entry);
+        ImGui::EndPopup();
+    } else {
+        infoPopupEntryId_.clear(); // closed (e.g. clicked outside) -- stop tracking
+    }
+}
+
+void StartupTab::RenderInfoContent(const startup::StartupEntry& entry) {
+    bool hasTarget = !entry.targetMissing && !entry.resolvedExePath.empty();
+
+    ImGui::TextUnformatted("Ruta:");
+    ImGui::SameLine();
+    ImGui::TextWrapped("%s", hasTarget ? entry.resolvedExePath.c_str() : "Archivo no encontrado");
+
+    if (!hasTarget) {
+        return;
+    }
+
+    auto it = infoCache_.find(entry.resolvedExePath);
+    if (it == infoCache_.end()) {
+        ImGui::TextDisabled("No disponible");
+        return;
+    }
+    const startup::AppInfo& appInfo = it->second.appInfo;
+    const startup::SignatureInfo& sigInfo = it->second.signatureInfo;
+
+    std::string signerText;
+    switch (sigInfo.status) {
+        case startup::SignatureStatus::Trusted:
+            signerText = sigInfo.signerName.has_value() ? platform::WideToUtf8(*sigInfo.signerName)
+                                                          : "(nombre no disponible)";
+            break;
+        case startup::SignatureStatus::NotSigned:
+            signerText = "Sin firmar";
+            break;
+        case startup::SignatureStatus::VerificationFailed:
+            signerText = "No se pudo comprobar la firma";
+            break;
+    }
+    ImGui::Text("Editor: %s", signerText.c_str());
+
+    if (appInfo.fileSizeBytes.has_value()) {
+        double megabytes = static_cast<double>(*appInfo.fileSizeBytes) / (1024.0 * 1024.0);
+        ImGui::Text("Tamano: %.2f MB", megabytes);
+    } else {
+        ImGui::TextUnformatted("Tamano: No disponible");
+    }
+
+    ImGui::Text("Version: %s", appInfo.productVersion.value_or("No disponible").c_str());
+    ImGui::Text("Descripcion: %s", appInfo.fileDescription.value_or("No disponible").c_str());
+}
+
+void StartupTab::OpenContainingFolder(const startup::StartupEntry& entry) {
+    std::wstring path = platform::Utf8ToWide(entry.resolvedExePath);
+    std::wstring args = L"/select,\"" + path + L"\"";
+    HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<intptr_t>(result) <= 32) {
+        lastErrorMessage_ = "No se pudo abrir la ubicacion de \"" + entry.displayName + "\".";
+    } else {
+        lastErrorMessage_.clear();
     }
 }
 
