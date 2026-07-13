@@ -169,5 +169,39 @@ bool SetShortcutEnabled(StartupEntry& entry, bool enabled) {
     return true;
 }
 
+bool DeleteToRecycleBin(const StartupEntry& entry) {
+    if (entry.shortcutFilePath.empty()) {
+        return false;
+    }
+    if (!PathFileExistsW(entry.shortcutFilePath.c_str())) {
+        return true; // already gone -- desired end state already holds
+    }
+
+    IFileOperation* fileOp = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_IFileOperation,
+                                   reinterpret_cast<void**>(&fileOp));
+    if (FAILED(hr) || !fileOp) {
+        return false;
+    }
+
+    bool succeeded = false;
+    // FOF_ALLOWUNDO: send to Recycle Bin, not a permanent delete.
+    // FOF_NOCONFIRMATION/FOF_SILENT: this app already showed its own
+    // confirmation dialog before calling this -- suppress Explorer's.
+    if (SUCCEEDED(fileOp->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT))) {
+        IShellItem* item = nullptr;
+        hr = SHCreateItemFromParsingName(entry.shortcutFilePath.c_str(), nullptr, IID_IShellItem,
+                                          reinterpret_cast<void**>(&item));
+        if (SUCCEEDED(hr) && item) {
+            if (SUCCEEDED(fileOp->DeleteItem(item, nullptr))) {
+                succeeded = SUCCEEDED(fileOp->PerformOperations());
+            }
+            item->Release();
+        }
+    }
+    fileOp->Release();
+    return succeeded;
+}
+
 } // namespace ShortcutStartupControl
 } // namespace startup

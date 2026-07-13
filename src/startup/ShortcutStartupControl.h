@@ -16,4 +16,11 @@ std::vector<StartupEntry> EnumerateCommonStartupFolder();
 // for the next rescan to see the change reflected.
 bool SetShortcutEnabled(StartupEntry& entry, bool enabled);
 
+// Sends the .lnk to the Recycle Bin (never the shortcut's target exe --
+// the shortcut itself is just an autostart pointer, this is the delete
+// counterpart to SetShortcutEnabled). Requires COM already initialized on
+// this thread. A missing file counts as success: the desired end state
+// ("this doesn't autostart") already holds.
+bool DeleteToRecycleBin(const StartupEntry& entry);
+
 } // namespace startup::ShortcutStartupControl
