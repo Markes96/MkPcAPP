@@ -175,3 +175,19 @@ scan itself runs on the existing 1 Hz data-tick thread
 (`StartupTab::OnTick`, every ~10 ticks) since it does no D3D calls; the two
 are kept strictly separate to avoid a second thread ever touching the D3D
 device.
+
+**App info / eliminar universal.** `startup::AppInfoReader::ReadAppInfo`
+lee el tamaño de archivo y el bloque `VERSIONINFO` (versión de producto,
+descripción) de un `.exe`, igual de puro/sin estado que `IconExtractor`.
+`SignatureVerifier::GetSignatureInfo` comparte la misma caché por
+`(ruta, fecha de modificación)` que `IsMicrosoftSigned`, pero además expone
+el nombre real del firmante y distingue "sin firmar" (`TRUST_E_NOSIGNATURE`)
+de "no se pudo comprobar la firma" (cualquier otro fallo), para que el popup
+de info de `StartupTab` pueda mostrar el mensaje correcto en cada caso.
+Eliminar una entrada es válido para cualquier fuente, no solo las añadidas
+por la app: `RegistryStartupControl::DeleteRunEntry` borra el valor `Run`
+(nunca el `.exe`), y `ShortcutStartupControl::DeleteToRecycleBin` envía el
+`.lnk` a la Papelera de reciclaje vía `IFileOperation` (nunca el ejecutable
+al que apunta) -- ambos, en `StartupTab`, están siempre detrás de
+`ui::ConfirmDeleteDialog`, que captura su propia copia de la entrada en vez
+de una referencia viva, para que un rescan concurrente no la invalide.

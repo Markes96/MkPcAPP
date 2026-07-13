@@ -21,10 +21,8 @@
 
 Añade una tercera sección (`ui::StartupTab`, registrada junto a
 `HardwareMonitorTab` y `PerfilesTab` sin tocar el resto del shell) para ver,
-activar/desactivar y añadir manualmente programas de terceros que arrancan
-con Windows — con el mismo espíritu "no apto para torpes" del resto de la
-app: nunca se puede tocar nada crítico del propio Windows, y quitar una
-entrada nunca la borra, siempre es reversible con un clic.
+activar/desactivar, eliminar y añadir manualmente programas de terceros que
+arrancan con Windows.
 
 ### Qué hace
 
@@ -32,74 +30,74 @@ entrada nunca la borra, siempre es reversible con un clic.
   espejo `WOW6432Node` en Windows de 64 bits), más accesos directos en la
   carpeta "Inicio" del usuario actual y en la de todos los usuarios. Fuera de
   alcance deliberadamente: Tareas Programadas.
-- **Quitar = deshabilitar, no borrar**, igual que el Administrador de tareas
-  de Windows: para el Registro, se marca el flag de estado en
-  `...\Explorer\StartupApproved\Run` (mismo formato de bytes que usa el
-  propio Explorer/Task Manager) sin tocar el valor `Run`; para accesos
-  directos, se mueve el `.lnk` a una subcarpeta `Disabled` junto a la carpeta
-  "Inicio" en vez de borrarlo. Reversible con un clic en ambos casos.
+- **Lista horizontal**: una fila por entrada (icono, nombre, origen,
+  activar/desactivar, acciones), en vez de una cuadrícula de tarjetas.
+- **Activar/desactivar** reversible: para el Registro, se marca el flag de
+  estado en `...\Explorer\StartupApproved\Run` (mismo formato de bytes que
+  usa el propio Explorer/Task Manager) sin tocar el valor `Run`; para
+  accesos directos, se mueve el `.lnk` a una subcarpeta `Disabled` junto a
+  la carpeta "Inicio" en vez de borrarlo.
+- **Eliminar, para cualquier entrada** (no solo las añadidas desde esta
+  app), siempre tras un diálogo de confirmación: nunca borra la app real,
+  solo el registro que la hace arrancar. Para el Registro, borra el valor
+  `Run` (+ limpieza best-effort del `StartupApproved` a juego). Para
+  accesos directos, envía el `.lnk` a la Papelera de reciclaje de Windows
+  (recuperable), nunca al ejecutable al que apunta.
+- **Info de la app** (botón "i"): ruta completa, editor/firmante (o "Sin
+  firmar"/"No se pudo comprobar la firma" si no aplica), tamaño del
+  archivo, y versión/descripción leídas del bloque `VERSIONINFO` del
+  `.exe`. Cualquier dato no disponible se muestra explícitamente como "No
+  disponible" en vez de dejarse en blanco.
+- **Abrir ubicación**: abre el Explorador de Windows con el ejecutable ya
+  seleccionado; el botón se deshabilita (con explicación al pasar el
+  ratón) si el archivo ya no existe, en vez de fallar tras el clic.
 - **Filtro de apps de Microsoft**: cualquier ejecutable firmado por
   Microsoft (comprobado vía `WinVerifyTrust`/Authenticode) se excluye por
-  completo de la lista — nunca se muestra ni bloqueado, directamente no
-  aparece. Cualquier fallo de verificación (archivo sin firmar, corrupto, o
-  error de comprobación) se trata como "no es de Microsoft" y la entrada se
-  muestra, para no arriesgarse a ocultar algo por error.
+  completo de la lista. Cualquier fallo de verificación se trata como "no
+  es de Microsoft" y la entrada se muestra, para no arriesgarse a ocultar
+  algo por error.
 - **Icono real por tarjeta**, extraído del propio `.exe` (o del destino
   resuelto del acceso directo); si la extracción falla o el archivo de
-  destino ya no existe, se muestra un placeholder en vez de nada o un icono
-  roto.
+  destino ya no existe, se muestra un placeholder.
 - **Añadir manualmente**: botón "+" abre un selector de archivo nativo
   filtrado a `.exe`; la entrada nueva siempre se crea en
-  `HKCU\...\Run` (nunca en HKLM), con nombre editable. Solo las entradas
-  añadidas así en la sesión actual de la app muestran un botón "Quitar"
-  (borrado real); el resto de entradas son solo activar/desactivar.
-- Rescan completo cada ~10 segundos (no cada segundo) para no repetir
-  verificación de firma/registro con demasiada frecuencia; el icono y el
-  estado de la entrada se actualizan al vuelo tras cada acción del usuario
-  sin esperar al siguiente rescan.
+  `HKCU\...\Run` (nunca en HKLM), con nombre editable.
+- Rescan completo cada ~10 segundos (no cada segundo); un alta o baja
+  manual dispara un rescan inmediato en vez de esperar al siguiente ciclo.
 
 ### Limitaciones conocidas / mejor esfuerzo
 
-- **Tras reiniciar la app, una entrada añadida manualmente deja de ser
-  distinguible** de cualquier otra entrada `HKCU\...\Run` ya existente, y
-  pasa a mostrarse solo con activar/desactivar (pierde el botón "Quitar").
-  Aceptado deliberadamente: no se persiste "qué se añadió manualmente" en
-  disco (ver más abajo), y desactivar sigue disponible en todo momento, así
-  que no es una regresión funcional real, solo una diferencia de UI tras
-  reiniciar.
 - **Sin persistencia JSON nueva**: el Registro/sistema de archivos ya es la
   fuente de verdad de qué arranca con Windows; las cachés de firma
-  (`SignatureVerifier`) y de textura de icono (`platform::IconTextureCache`)
-  viven solo en memoria y se reconstruyen en cada arranque de la app —
-  comprobar de nuevo un par de docenas de ejecutables una vez por sesión es
-  barato.
+  (`SignatureVerifier`), de info de app (`AppInfoReader`, cacheada en la UI
+  por ruta) y de textura de icono (`platform::IconTextureCache`) viven solo
+  en memoria y se reconstruyen en cada arranque de la app.
 
 ### Arquitectura (resumen)
 
-Nuevo módulo `src/startup/` (tipos puros en `StartupTypes.h`, control de
-Registro en `RegistryStartupControl`, control de accesos directos en
+Módulo `src/startup/` (tipos puros en `StartupTypes.h`, control de Registro
+en `RegistryStartupControl`, control de accesos directos en
 `ShortcutStartupControl`, verificación de firma en `SignatureVerifier`,
-extracción de icono en `IconExtractor`, orquestación en `StartupScanner`)
-más `src/ui/StartupTab` (+ `AddStartupEntryDialog`) y
-`src/platform/IconTextureCache` (sube bitmaps de icono a texturas D3D11,
-separado de `DX11Renderer` para no acoplar el renderer genérico a esta
-funcionalidad), siguiendo el mismo patrón de extensión por `ITab` que ya
-usan Hardware Monitor y Perfiles. El escaneo completo (Registro + carpetas +
-verificación de firma) corre en el hilo de datos a 1 Hz ya existente, cada
-~10 ticks; la creación de texturas de icono ocurre solo en el hilo de
-render, nunca en el de datos.
+extracción de icono en `IconExtractor`, lectura de metadatos de app en
+`AppInfoReader`, orquestación en `StartupScanner`) más `src/ui/StartupTab`
+(+ `AddStartupEntryDialog`, `ConfirmDeleteDialog`) y
+`src/platform/IconTextureCache`, siguiendo el mismo patrón de extensión por
+`ITab` que ya usan Hardware Monitor y Perfiles. El escaneo completo (Registro
++ carpetas + verificación de firma) corre en el hilo de datos a 1 Hz ya
+existente, cada ~10 ticks; la creación de texturas de icono, y la lectura de
+info de app/firma para el popup, ocurren solo en el hilo de render.
 
 ### Verificación pendiente (requiere máquina Windows real)
 
 Aún sin probar en la máquina real del usuario: compilación y enlazado con
-las nuevas librerías COM/`wintrust`/`crypt32`/`gdi32`; que `WinVerifyTrust`
-identifica correctamente binarios reales firmados por Microsoft y los
-excluye; ida y vuelta con el Administrador de tareas de Windows al
-deshabilitar/habilitar una entrada; extracción de icono en una muestra real
-de apps de arranque instaladas; que el selector nativo de archivo abre y
-devuelve ruta correctamente; y que mover accesos directos entre la carpeta
-"Inicio" y su subcarpeta `Disabled` funciona con los permisos NTFS reales de
-la máquina, en ambas carpetas (usuario y todos los usuarios).
+las nuevas librerías COM/`wintrust`/`crypt32`/`gdi32`/`version`; que
+`WinVerifyTrust` identifica correctamente binarios reales firmados por
+Microsoft y los excluye; ida y vuelta con el Administrador de tareas de
+Windows al deshabilitar/habilitar una entrada; que eliminar un acceso
+directo lo manda a la Papelera de reciclaje (verificable abriéndola) y que
+eliminar un valor de Registro de HKLM funciona estando elevado; que "Abrir
+ubicación" selecciona el archivo correcto en el Explorador; y que el popup
+de info muestra datos correctos (incluyendo casos sin versión/sin firma).
 
 ## Iteración 2 — Sección "Perfiles": perfiles de rendimiento + automatización (en PR, pendiente de fusionar a main)
 
