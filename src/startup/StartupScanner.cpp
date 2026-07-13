@@ -2,7 +2,6 @@
 #include "ShortcutStartupControl.h"
 #include "../platform/ComScope.h"
 #include "../platform/StringConvert.h"
-#include <algorithm>
 
 namespace startup {
 
@@ -37,11 +36,10 @@ ScanResult StartupScanner::Scan() {
     all.insert(all.end(), userFolder.begin(), userFolder.end());
     all.insert(all.end(), commonFolder.begin(), commonFolder.end());
 
-    // signatureVerifier_/manuallyAddedValueNames_ are the only state shared
-    // with the main-thread SetEnabled/AddManualEntry/DeleteManualEntry calls
-    // -- lock only around touching those, not around the registry/
-    // filesystem enumeration itself (which is this function's slow part and
-    // doesn't touch shared state).
+    // signatureVerifier_ is the only state shared with the main-thread
+    // AddManualEntry/DeleteEntry/GetSignatureInfo calls -- lock only around
+    // touching it, not around the registry/filesystem enumeration itself
+    // (this function's slow part, which doesn't touch shared state).
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : all) {
         bool isMicrosoft = false;
@@ -51,13 +49,6 @@ ScanResult StartupScanner::Scan() {
         if (isMicrosoft) {
             continue; // excluded entirely, never just greyed out
         }
-
-        if (entry.source == StartupSource::RegistryHkcuRun &&
-            std::find(manuallyAddedValueNames_.begin(), manuallyAddedValueNames_.end(),
-                      entry.registryValueName) != manuallyAddedValueNames_.end()) {
-            entry.deletable = true;
-        }
-
         result.entries.push_back(std::move(entry));
     }
 
@@ -88,28 +79,32 @@ bool StartupScanner::SetEnabled(StartupEntry& entry, bool enabled) {
 
 RegistryStartupControl::AddResult StartupScanner::AddManualEntry(const std::wstring& displayName,
                                                                     const std::wstring& exePath) {
-    RegistryStartupControl::AddResult addResult =
-        RegistryStartupControl::AddUserRunEntry(displayName, QuoteIfNeeded(exePath));
-    if (addResult == RegistryStartupControl::AddResult::Ok) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        manuallyAddedValueNames_.push_back(displayName);
-    }
-    return addResult;
+    return RegistryStartupControl::AddUserRunEntry(displayName, QuoteIfNeeded(exePath));
 }
 
-bool StartupScanner::DeleteManualEntry(const StartupEntry& entry) {
-    if (!entry.deletable || entry.source != StartupSource::RegistryHkcuRun) {
-        return false;
+bool StartupScanner::DeleteEntry(const StartupEntry& entry) {
+    switch (entry.source) {
+        case StartupSource::RegistryHkcuRun:
+            return RegistryStartupControl::DeleteRunEntry(HKEY_CURRENT_USER, entry.registryValueName,
+                                                             entry.isWow6432);
+        case StartupSource::RegistryHklmRun:
+            return RegistryStartupControl::DeleteRunEntry(HKEY_LOCAL_MACHINE, entry.registryValueName,
+                                                             entry.isWow6432);
+        case StartupSource::StartupFolderUser:
+        case StartupSource::StartupFolderCommon: {
+            // Recycle-bin deletion needs COM (IFileOperation), bracketed
+            // locally since this is a rare, user-triggered one-off action,
+            // not part of Scan()'s per-cycle ComScope pairing.
+            ComScope comScope;
+            return ShortcutStartupControl::DeleteToRecycleBin(entry);
+        }
     }
-    bool deleted = RegistryStartupControl::DeleteUserRunEntry(entry.registryValueName);
-    if (deleted) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        manuallyAddedValueNames_.erase(
-            std::remove(manuallyAddedValueNames_.begin(), manuallyAddedValueNames_.end(),
-                        entry.registryValueName),
-            manuallyAddedValueNames_.end());
-    }
-    return deleted;
+    return false;
+}
+
+SignatureInfo StartupScanner::GetSignatureInfo(const std::wstring& exePath) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return signatureVerifier_.GetSignatureInfo(exePath);
 }
 
 } // namespace startup

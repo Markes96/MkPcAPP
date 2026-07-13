@@ -19,11 +19,11 @@ struct ScanResult {
 // platform::IconTextureCache, owned by the UI layer instead.
 //
 // Thread-safe: Scan() is expected to run on StartupTab's OnTick (background
-// data-tick thread) while SetEnabled/AddManualEntry/DeleteManualEntry are
-// called from OnRender (main thread) in response to user clicks --
-// signatureVerifier_'s cache and manuallyAddedValueNames_ are the only state
-// shared between those calls, guarded by mutex_ the same way
-// AutomationEngine guards rules_.
+// data-tick thread) while SetEnabled/AddManualEntry/DeleteEntry/
+// GetSignatureInfo are called from OnRender (main thread) in response to
+// user clicks -- signatureVerifier_'s cache is the only state shared
+// between those calls, guarded by mutex_ the same way AutomationEngine
+// guards rules_.
 class StartupScanner {
 public:
     ScanResult Scan();
@@ -37,17 +37,21 @@ public:
     RegistryStartupControl::AddResult AddManualEntry(const std::wstring& displayName,
                                                        const std::wstring& exePath);
 
-    // Only valid for entries with deletable == true (created by
-    // AddManualEntry this same session).
-    bool DeleteManualEntry(const StartupEntry& entry);
+    // Valid for ANY entry, not just ones added through this app --
+    // Registry entries have their Run value deleted (never the .exe);
+    // Startup-folder shortcuts are sent to the Recycle Bin (never the
+    // target .exe). A "not found" outcome (already deleted by something
+    // else) counts as success: the desired end state already holds.
+    bool DeleteEntry(const StartupEntry& entry);
+
+    // Used by the "info" popup. Thread-safe wrapper around
+    // SignatureVerifier::GetSignatureInfo -- shares the same cache Scan()
+    // populates via IsMicrosoftSigned.
+    SignatureInfo GetSignatureInfo(const std::wstring& exePath);
 
 private:
-    std::mutex mutex_; // guards signatureVerifier_ and manuallyAddedValueNames_ only
+    std::mutex mutex_; // guards signatureVerifier_ only
     SignatureVerifier signatureVerifier_;
-    // Value names added via AddManualEntry() this session -- the only
-    // entries that get deletable=true on subsequent Scan() calls (see
-    // StartupScanner.cpp for why this doesn't survive an app restart).
-    std::vector<std::wstring> manuallyAddedValueNames_;
 };
 
 } // namespace startup
