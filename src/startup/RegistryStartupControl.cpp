@@ -209,9 +209,12 @@ AddResult AddUserRunEntry(const std::wstring& displayName, const std::wstring& q
     return status == ERROR_SUCCESS ? AddResult::Ok : AddResult::Failed;
 }
 
-bool DeleteUserRunEntry(const std::wstring& valueName) {
+bool DeleteRunEntry(HKEY hive, const std::wstring& valueName, bool isWow6432) {
+    const wchar_t* runPath = isWow6432 ? kRunKeyPathWow6432 : kRunKeyPath;
+    const wchar_t* approvedPath = isWow6432 ? kApprovedRunKeyPathWow6432 : kApprovedRunKeyPath;
+
     HKEY runKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKeyPath, 0, KEY_SET_VALUE, &runKey) != ERROR_SUCCESS) {
+    if (RegOpenKeyExW(hive, runPath, 0, KEY_SET_VALUE, &runKey) != ERROR_SUCCESS) {
         return false;
     }
     LSTATUS status = RegDeleteValueW(runKey, valueName.c_str());
@@ -222,13 +225,12 @@ bool DeleteUserRunEntry(const std::wstring& valueName) {
     // exists is harmless (Explorer only consults it alongside a live Run
     // value).
     HKEY approvedKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kApprovedRunKeyPath, 0, KEY_SET_VALUE, &approvedKey) ==
-        ERROR_SUCCESS) {
+    if (RegOpenKeyExW(hive, approvedPath, 0, KEY_SET_VALUE, &approvedKey) == ERROR_SUCCESS) {
         RegDeleteValueW(approvedKey, valueName.c_str());
         RegCloseKey(approvedKey);
     }
 
-    return status == ERROR_SUCCESS;
+    return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND;
 }
 
 } // namespace RegistryStartupControl

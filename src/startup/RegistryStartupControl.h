@@ -32,9 +32,13 @@ enum class AddResult { Ok, DuplicateName, Failed };
 // already exists.
 AddResult AddUserRunEntry(const std::wstring& displayName, const std::wstring& quotedExePath);
 
-// Deletes a HKCU Run value (only ever called for entries this session
-// marked deletable). Best-effort also removes the matching StartupApproved
-// value so no orphaned state blob lingers; that part's failure is ignored.
-bool DeleteUserRunEntry(const std::wstring& valueName);
+// Deletes a Run value in the given hive (HKCU or HKLM), valid for ANY
+// entry now (not just ones this app added) -- never touches the .exe the
+// value points at, only the autostart registration itself. Best-effort
+// also removes the matching StartupApproved value so no orphaned state
+// blob lingers; that part's failure is ignored. A value that's already
+// gone (ERROR_FILE_NOT_FOUND) counts as success: the desired end state
+// ("this doesn't autostart") already holds.
+bool DeleteRunEntry(HKEY hive, const std::wstring& valueName, bool isWow6432);
 
 } // namespace startup::RegistryStartupControl
