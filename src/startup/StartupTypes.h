@@ -36,11 +36,6 @@ struct StartupEntry {
     // time -- still shown (never hidden), signature check and icon
     // extraction are skipped for it.
     bool targetMissing = false;
-    // True only for entries created by AddManualEntry() during this app
-    // session -- only those offer a "Quitar" (delete) button; everything
-    // else is disable/enable-only, never delete, per the "no apto para
-    // torpes" safety goal.
-    bool deletable = false;
 };
 
 } // namespace startup
