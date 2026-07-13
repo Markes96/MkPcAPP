@@ -4,7 +4,6 @@
 #include <wincrypt.h>
 #include <algorithm>
 #include <cwctype>
-#include <optional>
 #include <vector>
 
 namespace startup {
@@ -27,8 +26,10 @@ bool SameFileTime(const FILETIME& a, const FILETIME& b) {
 // WinVerifyTrust is a state-machine API: dwStateAction selects verify vs.
 // close. The second call (WTD_STATEACTION_CLOSE) is required cleanup for the
 // trust provider state handle, easy to miss since it isn't a normal
-// Release()/Close() call.
-bool VerifyTrust(const std::wstring& path) {
+// Release()/Close() call. TRUST_E_NOSIGNATURE is a documented WinVerifyTrust
+// status distinct from other failures -- distinguishing it lets callers show
+// "Sin firmar" separately from "no se pudo comprobar la firma".
+SignatureStatus CheckTrust(const std::wstring& path) {
     WINTRUST_FILE_INFO fileInfo = {};
     fileInfo.cbStruct = sizeof(fileInfo);
     fileInfo.pcwszFilePath = path.c_str();
@@ -47,13 +48,19 @@ bool VerifyTrust(const std::wstring& path) {
     trustData.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &action, &trustData);
 
-    return status == ERROR_SUCCESS;
+    if (status == ERROR_SUCCESS) {
+        return SignatureStatus::Trusted;
+    }
+    if (status == TRUST_E_NOSIGNATURE) {
+        return SignatureStatus::NotSigned;
+    }
+    return SignatureStatus::VerificationFailed;
 }
 
-// Extracts the signer's subject common name (lowercased) from the file's
-// Authenticode signature. Only meaningful to call after VerifyTrust() has
-// already returned true for this path.
-std::optional<std::wstring> GetSignerDisplayNameLower(const std::wstring& path) {
+// Extracts the signer's subject common name (original case) from the
+// file's Authenticode signature. Only meaningful to call after
+// CheckTrust() has already returned Trusted for this path.
+std::optional<std::wstring> GetSignerDisplayName(const std::wstring& path) {
     HCERTSTORE store = nullptr;
     HCRYPTMSG msg = nullptr;
     DWORD encoding = 0, contentType = 0, formatType = 0;
@@ -79,10 +86,7 @@ std::optional<std::wstring> GetSignerDisplayNameLower(const std::wstring& path) 
                 wchar_t nameBuffer[256] = {};
                 CertGetNameStringW(certContext, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, nameBuffer,
                                     ARRAYSIZE(nameBuffer));
-                std::wstring name(nameBuffer);
-                std::transform(name.begin(), name.end(), name.begin(),
-                                [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-                result = name;
+                result = std::wstring(nameBuffer);
                 CertFreeCertificateContext(certContext);
             }
         }
@@ -93,11 +97,19 @@ std::optional<std::wstring> GetSignerDisplayNameLower(const std::wstring& path) 
     return result;
 }
 
+bool NameIndicatesMicrosoft(const std::wstring& name) {
+    std::wstring lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                    [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    return lower.find(L"microsoft windows") != std::wstring::npos ||
+           lower.find(L"microsoft corporation") != std::wstring::npos;
+}
+
 } // namespace
 
-bool SignatureVerifier::IsMicrosoftSigned(const std::wstring& exePath) {
+SignatureVerifier::CacheEntry SignatureVerifier::Resolve(const std::wstring& exePath) {
     if (exePath.empty()) {
-        return false;
+        return {};
     }
 
     FILETIME currentWriteTime = {};
@@ -105,22 +117,34 @@ bool SignatureVerifier::IsMicrosoftSigned(const std::wstring& exePath) {
 
     auto it = cache_.find(exePath);
     if (it != cache_.end() && haveWriteTime && SameFileTime(it->second.lastWriteTime, currentWriteTime)) {
-        return it->second.isMicrosoftSigned;
+        return it->second;
     }
 
-    bool verdict = false;
-    if (VerifyTrust(exePath)) {
-        std::optional<std::wstring> signerName = GetSignerDisplayNameLower(exePath);
-        if (signerName.has_value()) {
-            verdict = signerName->find(L"microsoft windows") != std::wstring::npos ||
-                      signerName->find(L"microsoft corporation") != std::wstring::npos;
-        }
+    CacheEntry entry;
+    entry.lastWriteTime = currentWriteTime;
+    entry.status = CheckTrust(exePath);
+    if (entry.status == SignatureStatus::Trusted) {
+        entry.signerName = GetSignerDisplayName(exePath);
+        entry.isMicrosoftSigned = entry.signerName.has_value() && NameIndicatesMicrosoft(*entry.signerName);
     }
 
     if (haveWriteTime) {
-        cache_[exePath] = CacheEntry{currentWriteTime, verdict};
+        cache_[exePath] = entry;
     }
-    return verdict;
+    return entry;
+}
+
+bool SignatureVerifier::IsMicrosoftSigned(const std::wstring& exePath) {
+    return Resolve(exePath).isMicrosoftSigned;
+}
+
+SignatureInfo SignatureVerifier::GetSignatureInfo(const std::wstring& exePath) {
+    CacheEntry entry = Resolve(exePath);
+    SignatureInfo info;
+    info.status = entry.status;
+    info.isMicrosoftSigned = entry.isMicrosoftSigned;
+    info.signerName = entry.signerName;
+    return info;
 }
 
 } // namespace startup
