@@ -70,7 +70,24 @@ void GroupProcessTracker::ReleaseOwnership(const std::string& groupId, const std
     pending.resolvedExePath = resolvedExePath;
     pending.processHandle = handle;
     pending.deadlineTick = nowTickCount + kForceCloseDelayTicks;
+    pending.pid = pid;
     pendingForceClose_.push_back(std::move(pending));
+}
+
+bool GroupProcessTracker::ReclaimPending(const std::string& groupId, const std::wstring& resolvedExePath) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = pendingForceClose_.begin(); it != pendingForceClose_.end(); ++it) {
+        if (it->resolvedExePath == resolvedExePath) {
+            OwnedProcess owned;
+            owned.pid = it->pid;
+            owned.processHandle = it->processHandle;
+            owned.ownerGroupIds.insert(groupId);
+            ownedByPath_[resolvedExePath] = std::move(owned);
+            pendingForceClose_.erase(it);
+            return true;
+        }
+    }
+    return false;
 }
 
 void GroupProcessTracker::Tick(uint64_t tickCount) {

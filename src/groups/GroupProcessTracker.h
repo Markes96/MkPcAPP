@@ -63,6 +63,19 @@ public:
     // `nowTickCount + kForceCloseDelayTicks`.
     void ReleaseOwnership(const std::string& groupId, const std::wstring& resolvedExePath, uint64_t nowTickCount);
 
+    // If `resolvedExePath` has a pending force-close scheduled (this app
+    // was released by its last owning group but hasn't been confirmed
+    // exited or force-terminated yet), cancels that pending close and
+    // re-registers the same already-running process (same PID/handle, no
+    // relaunch) as owned by `groupId` instead. Returns true if a pending
+    // entry was found and reclaimed, false otherwise (nothing pending for
+    // this path). Exists so that reopening a group within the grace
+    // period of its own "Cerrar grupo" doesn't get the app force-killed
+    // out from under the user -- see GroupLauncher::OpenGroup, which
+    // calls this between the IsPathCurrentlyOwned and IsProcessRunning
+    // checks.
+    bool ReclaimPending(const std::string& groupId, const std::wstring& resolvedExePath);
+
     // Called once per tick (~1 Hz) from the background data-tick thread.
     // Force-terminates any pending close whose deadline has passed and
     // the process is still alive.
@@ -82,6 +95,7 @@ private:
         std::wstring resolvedExePath;
         HANDLE processHandle = nullptr;
         uint64_t deadlineTick = 0;
+        DWORD pid = 0;
     };
 
     mutable std::mutex mutex_;

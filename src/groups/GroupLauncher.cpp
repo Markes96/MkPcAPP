@@ -31,6 +31,17 @@ std::vector<EntryOpenOutcome> GroupLauncher::OpenGroup(const std::string& groupI
             continue;
         }
 
+        if (tracker_.ReclaimPending(groupId, widePath)) {
+            // Reopened within the grace period of this same group's own
+            // "Cerrar grupo" -- the app never actually exited, so cancel
+            // its pending force-close and reclaim it instead of treating
+            // it as externally owned (which would let the stale
+            // force-close kill it a few ticks later).
+            outcome.status = EntryOpenStatus::Launched;
+            outcomes.push_back(outcome);
+            continue;
+        }
+
         // Running for a reason the tracker doesn't know about (normally:
         // the user already had it open) -- leave it alone entirely.
         if (IsProcessRunning(widePath)) {
