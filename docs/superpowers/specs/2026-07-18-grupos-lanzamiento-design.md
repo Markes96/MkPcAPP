@@ -66,14 +66,19 @@ Mismo reparto de responsabilidades que `src/profiles/` y `src/startup/`:
 
 - **`GroupStore`/`GroupJson`** — persistencia de la lista de grupos (solo
   `id`/`name`/`entries`, nunca estado de ejecución) en
-  `%LOCALAPPDATA%\MkPCApp\groups.json`, reutilizando el mismo lector/
-  escritor JSON minimalista que ya existe en `src/profiles/ProfileJson.*`
-  en vez de duplicar uno nuevo (se generaliza ligeramente si hace falta,
-  o se copia el patrón — decisión de implementación, no de diseño).
+  `%LOCALAPPDATA%\MkPCApp\groups.json`. `ProfileJson.cpp` ya trae un
+  parser JSON minimalista hecho a mano (`JsonValue`/`JsonParser` en un
+  namespace anónimo) — como `groups.json` necesita la misma capacidad de
+  anidar objetos/arrays (cada grupo tiene un array `entries`), el plan de
+  implementación extrae esa maquinaria genérica a un módulo compartido
+  (`platform::MiniJson`) del que tiran tanto `ProfileJson` como
+  `GroupJson`, en vez de duplicar ~170 líneas de parser.
 - **`ShortcutResolver`** — no es módulo nuevo: `LaunchEntry.resolvedExePath`
   se calcula reutilizando la resolución de `.lnk` que ya existe en
   `startup::ShortcutStartupControl` (vía `IShellLinkW`/`IPersistFile`),
-  expuesta como función reutilizable si no lo está ya.
+  hoy privada al `.cpp` — el plan la expone como función pública
+  (`ResolveShortcutTarget`) y hace que el escaneo de la carpeta Inicio la
+  llame también, en vez de mantener dos copias.
 - **`GroupProcessTracker`** — nuevo, el único componente sin equivalente
   previo en la app. Mantiene, solo en memoria (nunca persistido):
   - un mapa `resolvedExePath → conjunto de IDs de grupo que lo reclaman
@@ -88,13 +93,30 @@ Mismo reparto de responsabilidades que `src/profiles/` y `src/startup/`:
 
 ## Flujo "Abrir grupo"
 
-1. `CreateToolhelp32Snapshot` para tener la lista de procesos vivos.
-2. Para cada `LaunchEntry` del grupo:
-   - Si ya hay un proceso vivo cuyo ejecutable coincide con
-     `resolvedExePath` → **no se lanza nada**; esa entrada queda marcada
-     como "externa" para este grupo (no se registrará como propiedad suya,
-     así que "Cerrar grupo" nunca la tocará).
-   - Si no → `CreateProcess(path, args)`. El PID resultante se guarda
+**Corrección tras revisar el diseño al escribir el plan de implementación**:
+la primera versión de este flujo trataba "el proceso ya está corriendo" como
+un único caso ("externa", nunca reclamada) — eso rompía justo el escenario
+de Discord compartido entre LoL y Minecraft que se acordó con el usuario: si
+LoL abre Discord y luego se abre Minecraft mientras Discord sigue corriendo,
+Minecraft nunca se registraba como copropietario, así que cerrar solo LoL
+cerraba Discord de golpe aunque Minecraft siguiera "abierto". La versión
+corregida distingue **quién** tiene ya el proceso reclamado:
+
+1. Para cada `LaunchEntry` del grupo, primero se consulta
+   `GroupProcessTracker`: ¿esta `resolvedExePath` ya está reclamada por
+   **algún otro grupo actualmente abierto**?
+   - **Sí** → este grupo se une como copropietario (se añade a la lista de
+     dueños de esa ruta) **sin relanzar nada** — el proceso ya está vivo,
+     lanzado por el otro grupo. Esta entrada cuenta como "abierta" para
+     este grupo a todos los efectos (incluido el cierre, ver abajo).
+   - **No** → se comprueba a nivel de sistema
+     (`CreateToolhelp32Snapshot`) si ya hay un proceso vivo con esa ruta,
+     por una razón que el tracker no conoce (normalmente, que el usuario
+     ya la tenía abierta a mano). Si es así → **no se lanza nada** y la
+     entrada queda marcada "externa" para este grupo (nunca se registra
+     como propiedad suya, así que "Cerrar grupo" nunca la tocará). Si no
+     está corriendo en absoluto → se lanza (paso 2).
+2. `CreateProcess(path, args)`. El PID resultante se guarda
      (para poder cerrarlo más tarde vía `EnumWindows`/`TerminateProcess`),
      y se inserta este grupo en el conjunto de propietarios de esa
      `resolvedExePath` dentro de `GroupProcessTracker` — el conteo de
@@ -108,17 +130,23 @@ Mismo reparto de responsabilidades que `src/profiles/` y `src/startup/`:
 
 ## Flujo "Cerrar grupo"
 
-1. Para cada `LaunchEntry` que este grupo **reclama** (excluidas las
-   marcadas "externas" en el paso 2 de arriba):
-   - Se quita este grupo del conjunto de propietarios de esa
-     `resolvedExePath` en `GroupProcessTracker`.
-   - Si el conjunto queda vacío (ningún otro grupo abierto la sigue
-     reclamando) → cierre amable: `EnumWindows` para localizar las
-     ventanas de nivel superior cuyo proceso dueño coincide con el PID
-     rastreado, `WM_CLOSE` a cada una, esperar unos segundos, y
-     `TerminateProcess` si el proceso sigue vivo tras el margen.
-   - Si el conjunto no queda vacío → no se toca el proceso (otro grupo
-     abierto todavía lo necesita).
+1. Para cada `LaunchEntry` del grupo, se pide a `GroupProcessTracker` que
+   quite a este grupo del conjunto de propietarios de esa
+   `resolvedExePath`. Esto es seguro de llamar incondicionalmente para
+   **todas** las entradas, incluidas las que quedaron "externas" al abrir
+   (nunca llegaron a registrarse como propiedad de este grupo, así que
+   quitarlas es un no-op) — no hace falta que `GroupsTab` recuerde por
+   separado cuáles eran externas.
+   - Si el conjunto de propietarios de esa ruta queda vacío tras quitar a
+     este grupo (ningún otro grupo abierto la sigue reclamando) → cierre
+     amable: `EnumWindows` para localizar las ventanas de nivel superior
+     cuyo proceso dueño coincide con el PID rastreado, `WM_CLOSE` a cada
+     una, esperar unos segundos, y `TerminateProcess` si el proceso sigue
+     vivo tras el margen.
+   - Si el conjunto no queda vacío (otro grupo abierto todavía la
+     reclama) → no se toca el proceso.
+   - Si la ruta no estaba registrada en absoluto para este grupo (entrada
+     externa, o el lanzamiento había fallado) → no ocurre nada.
 2. El grupo pasa a estado "cerrado" en memoria.
 
 **Limitación conocida, aceptada por diseño**: el estado "abierto/cerrado" y
@@ -141,16 +169,23 @@ Perfiles:
   dos botones — **Abrir grupo** / **Cerrar grupo**. El botón que no aplica
   al estado actual del grupo se muestra deshabilitado.
 - **Indicador de estado** por tarjeta: "Abierto"/"Cerrado". Si alguna
-  entrada quedó "externa" en el último "Abrir", una nota discreta (p. ej.
-  "Discord ya estaba abierto — no se cerrará con este grupo").
+  entrada quedó marcada "externa" en el último "Abrir" (corriendo por una
+  razón ajena a esta app — normalmente, que el usuario ya la tenía
+  abierta), una nota discreta (p. ej. "Discord ya estaba abierto — no se
+  cerrará con este grupo"). Una entrada que se unió como copropietaria de
+  un grupo ya abierto (p. ej. Minecraft abriéndose mientras LoL ya tiene
+  Discord abierto) no lleva esa nota — sí se cerrará cuando corresponda,
+  como cualquier entrada que este grupo reclama.
 - **Botón "+"** para crear un grupo → editor modal (nombre + lista de
   entradas), reutilizando el selector de archivo nativo que ya usa
   `AddStartupEntryDialog`, pero **sin** el filtro a `.exe` (acepta
   cualquier ejecutable o `.lnk`).
-- **Editar/eliminar grupo** por tarjeta; eliminar siempre tras
-  `ui::ConfirmDeleteDialog` (ya genérico, reutilizado tal cual) — borra el
-  grupo de `groups.json`, nunca ningún ejecutable ni acceso directo real.
-  Si el grupo estaba "abierto" al eliminarlo, se comporta como si se
+- **Editar/eliminar grupo** por tarjeta; eliminar siempre tras un diálogo
+  de confirmación (mismo idioma visual que `ui::ConfirmDeleteDialog`,
+  aunque esa clase concreta está acoplada a `startup::StartupEntry` — este
+  módulo tiene su propia versión pequeña siguiendo el mismo patrón) — borra
+  el grupo de `groups.json`, nunca ningún ejecutable ni acceso directo
+  real. Si el grupo estaba "abierto" al eliminarlo, se comporta como si se
   hubiera pulsado "Cerrar grupo" primero (mismo flujo de arriba), para no
   dejar procesos huérfanos en el `GroupProcessTracker`.
 - **Añadir/quitar entradas** dentro del editor de un grupo existente.
