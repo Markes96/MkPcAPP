@@ -1,5 +1,6 @@
 #include "app/Application.h"
 #include "platform/WndProc.h"
+#include "resource.h"
 #include <windows.h>
 #include <cwchar>
 
@@ -35,6 +36,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmdLine, int) {
     windowClass.hInstance = instance;
     windowClass.lpszClassName = kWindowClassName;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APPICON));
+    windowClass.hIconSm = windowClass.hIcon;
     RegisterClassExW(&windowClass);
 
     HWND hwnd = CreateWindowExW(0, kWindowClassName, kWindowTitle, WS_OVERLAPPEDWINDOW,

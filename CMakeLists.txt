@@ -72,13 +72,14 @@ set(APP_SOURCES
     src/platform/DX11Renderer.cpp
     src/platform/IconTextureCache.cpp
     src/platform/WndProc.cpp
+    resources/AppIcon.rc
 )
 
 add_executable(MkPCApp WIN32 ${APP_SOURCES})
-target_include_directories(MkPCApp PRIVATE src)
+target_include_directories(MkPCApp PRIVATE src resources)
 target_link_libraries(MkPCApp PRIVATE imgui implot d3d11 dxgi shell32 iphlpapi advapi32
                                         PowrProf dxva2 ole32 oleaut32 wbemuuid
-                                        wintrust crypt32 shlwapi gdi32 uuid version)
+                                        wintrust crypt32 shlwapi gdi32 uuid version bcrypt)
 target_compile_definitions(MkPCApp PRIVATE UNICODE _UNICODE NOMINMAX)
 
 # Always request administrator elevation: full sensor access (CPU temperature,

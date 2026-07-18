@@ -118,6 +118,24 @@ std::vector<StartupEntry> EnumerateRunKeyValues(HKEY hive, const wchar_t* runPat
         if (nulPos != std::wstring::npos) {
             commandLine.resize(nulPos);
         }
+
+        // REG_EXPAND_SZ values (e.g. Windows' own SecurityHealth entry:
+        // "%SystemRoot%\system32\SecurityHealthSystray.exe") contain
+        // unexpanded environment-variable references. Windows itself
+        // expands these when actually launching the entry at logon, so
+        // leaving them unexpanded here makes PathFileExistsW look for a
+        // literal "%SystemRoot%\..." path that never exists -- every such
+        // entry would wrongly report targetMissing=true, which also skips
+        // the Microsoft-signature check below (it only runs when the
+        // target was found).
+        if (type == REG_EXPAND_SZ) {
+            wchar_t expanded[MAX_PATH];
+            DWORD expandedLen = ExpandEnvironmentStringsW(commandLine.c_str(), expanded, ARRAYSIZE(expanded));
+            if (expandedLen > 0 && expandedLen <= ARRAYSIZE(expanded)) {
+                commandLine.assign(expanded);
+            }
+        }
+
         std::wstring exePath = ParseExecutablePath(commandLine);
 
         StartupEntry entry;

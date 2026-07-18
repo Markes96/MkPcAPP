@@ -143,6 +143,19 @@ void StartupTab::RenderEntryRow(startup::StartupEntry& entry) {
         ImGui::SameLine();
         ImGui::TextDisabled("(archivo no encontrado)");
     }
+    if (entry.isUnderSystem32) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.25f, 0.25f, 1.0f));
+        ImGui::TextUnformatted("[!] En System32");
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Este programa se ejecuta desde la carpeta de sistema de Windows\n"
+                "(System32 / SysWOW64) pero no esta firmado por Microsoft.\n"
+                "El software legitimo casi nunca se instala ahi -- puede ser\n"
+                "una senal de malware disfrazado de componente del sistema.");
+        }
+    }
 
     ImGui::TableSetColumnIndex(2);
     ImGui::AlignTextToFramePadding();

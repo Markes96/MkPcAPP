@@ -4,6 +4,7 @@
 #include "../ui/PerfilesTab.h"
 #include "../ui/StartupTab.h"
 #include "../ui/Theme.h"
+#include "resource.h"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
@@ -18,7 +19,7 @@ namespace {
 constexpr LONGLONG kDataTickIntervalMs = 1000;
 } // namespace
 
-bool Application::Init(HWND hwnd, HINSTANCE /*instance*/) {
+bool Application::Init(HWND hwnd, HINSTANCE instance) {
     hwnd_ = hwnd;
 
     if (!renderer_.Init(hwnd)) {
@@ -51,7 +52,7 @@ bool Application::Init(HWND hwnd, HINSTANCE /*instance*/) {
     callbacks.onToggleAutoStart = []() { AutoStart::SetEnabled(!AutoStart::IsEnabled()); };
     callbacks.isAutoStartEnabled = []() { return AutoStart::IsEnabled(); };
     callbacks.onExit = [this]() { RequestExit(); };
-    trayIcon_.Create(hwnd, LoadIconW(nullptr, IDI_APPLICATION), callbacks);
+    trayIcon_.Create(hwnd, LoadIconW(instance, MAKEINTRESOURCEW(IDI_APPICON)), callbacks);
 
     bridgeProcess_.Start();
     StartDataTickThread();

@@ -20,6 +20,39 @@ std::wstring QuoteIfNeeded(const std::wstring& path) {
     return path;
 }
 
+bool PathStartsWithDir(const std::wstring& path, const wchar_t* dir, DWORD dirLen) {
+    if (dirLen == 0 || dirLen >= MAX_PATH) {
+        return false;
+    }
+    std::wstring dirWithSep(dir, dirLen);
+    if (dirWithSep.back() != L'\\') {
+        dirWithSep += L'\\';
+    }
+    if (path.size() < dirWithSep.size()) {
+        return false;
+    }
+    return _wcsnicmp(path.c_str(), dirWithSep.c_str(), dirWithSep.size()) == 0;
+}
+
+// GetSystemWow64DirectoryW covers 32-bit binaries redirected to SysWOW64 on
+// 64-bit Windows -- both are real "system" locations a legitimate
+// third-party installer has no business writing to without elevation.
+bool IsUnderSystemDirectory(const std::wstring& exePath) {
+    wchar_t systemDir[MAX_PATH];
+    DWORD systemDirLen = GetSystemDirectoryW(systemDir, MAX_PATH);
+    if (systemDirLen != 0 && PathStartsWithDir(exePath, systemDir, systemDirLen)) {
+        return true;
+    }
+
+    wchar_t wow64Dir[MAX_PATH];
+    DWORD wow64DirLen = GetSystemWow64DirectoryW(wow64Dir, MAX_PATH);
+    if (wow64DirLen != 0 && PathStartsWithDir(exePath, wow64Dir, wow64DirLen)) {
+        return true;
+    }
+
+    return false;
+}
+
 } // namespace
 
 ScanResult StartupScanner::Scan() {
@@ -42,13 +75,20 @@ ScanResult StartupScanner::Scan() {
     // (this function's slow part, which doesn't touch shared state).
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : all) {
-        bool isMicrosoft = false;
-        if (!entry.targetMissing && !entry.resolvedExePath.empty()) {
-            isMicrosoft = signatureVerifier_.IsMicrosoftSigned(Utf8ToWide(entry.resolvedExePath));
+        // A missing target can't actually run at logon, so there's nothing
+        // for "disable" to do -- listing it as a candidate would just
+        // mislead a non-technical user into thinking they're stopping
+        // something active. Excluded the same way as Microsoft-signed
+        // entries: entirely, never just greyed out.
+        if (entry.targetMissing) {
+            continue;
         }
+        std::wstring wideExePath = Utf8ToWide(entry.resolvedExePath);
+        bool isMicrosoft = signatureVerifier_.IsMicrosoftSigned(wideExePath);
         if (isMicrosoft) {
             continue; // excluded entirely, never just greyed out
         }
+        entry.isUnderSystem32 = IsUnderSystemDirectory(wideExePath);
         result.entries.push_back(std::move(entry));
     }
 

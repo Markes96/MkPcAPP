@@ -64,6 +64,10 @@ arrancan con Windows.
   `HKCU\...\Run` (nunca en HKLM), con nombre editable.
 - Rescan completo cada ~10 segundos (no cada segundo); un alta o baja
   manual dispara un rescan inmediato en vez de esperar al siguiente ciclo.
+- **Icono de aplicación propio**: `resources/AppIcon.ico` (+ `AppIcon.rc`,
+  compilado como recurso Win32 vía CMake) sustituye el icono genérico de
+  Windows en la barra de título, la barra de tareas y el icono de la
+  bandeja del sistema — antes de esto la app no tenía icono propio.
 
 ### Limitaciones conocidas / mejor esfuerzo
 
@@ -87,17 +91,28 @@ extracción de icono en `IconExtractor`, lectura de metadatos de app en
 existente, cada ~10 ticks; la creación de texturas de icono, y la lectura de
 info de app/firma para el popup, ocurren solo en el hilo de render.
 
+El icono de aplicación (`resources/AppIcon.rc`) se compila como recurso
+Win32 aparte, referenciado por `src/main.cpp` (clase de ventana) y
+`src/app/Application.cpp` (icono de bandeja) vía el mismo ID
+(`IDI_APPICON`, `resources/resource.h`) — no forma parte del módulo
+`src/startup/`, es transversal a toda la app.
+
 ### Verificación pendiente (requiere máquina Windows real)
 
-Aún sin probar en la máquina real del usuario: compilación y enlazado con
-las nuevas librerías COM/`wintrust`/`crypt32`/`gdi32`/`version`; que
-`WinVerifyTrust` identifica correctamente binarios reales firmados por
-Microsoft y los excluye; ida y vuelta con el Administrador de tareas de
-Windows al deshabilitar/habilitar una entrada; que eliminar un acceso
-directo lo manda a la Papelera de reciclaje (verificable abriéndola) y que
-eliminar un valor de Registro de HKLM funciona estando elevado; que "Abrir
-ubicación" selecciona el archivo correcto en el Explorador; y que el popup
-de info muestra datos correctos (incluyendo casos sin versión/sin firma).
+Confirmado en la máquina real del usuario: compilación y enlazado con las
+librerías COM/`wintrust`/`crypt32`/`gdi32`/`version`, y con el nuevo recurso
+de icono (`resources/AppIcon.rc`) — el `.exe` resultante lleva el icono
+embebido y la app arranca correctamente con él en la barra de tareas y la
+bandeja del sistema.
+
+Aún sin probar en la máquina real del usuario: que `WinVerifyTrust`
+identifica correctamente binarios reales firmados por Microsoft y los
+excluye; ida y vuelta con el Administrador de tareas de Windows al
+deshabilitar/habilitar una entrada; que eliminar un acceso directo lo manda
+a la Papelera de reciclaje (verificable abriéndola) y que eliminar un valor
+de Registro de HKLM funciona estando elevado; que "Abrir ubicación"
+selecciona el archivo correcto en el Explorador; y que el popup de info
+muestra datos correctos (incluyendo casos sin versión/sin firma).
 
 ## Iteración 2 — Sección "Perfiles": perfiles de rendimiento + automatización (en PR, pendiente de fusionar a main)
 

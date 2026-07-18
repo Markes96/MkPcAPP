@@ -36,6 +36,15 @@ struct StartupEntry {
     // time -- still shown (never hidden), signature check and icon
     // extraction are skipped for it.
     bool targetMissing = false;
+    // True if resolvedExePath sits under %SystemRoot%\System32 or SysWOW64
+    // and it wasn't excluded by the Microsoft-signature filter (i.e. it's
+    // not actually Microsoft's own binary). Legitimate non-Microsoft
+    // software essentially never installs there -- Windows Resource
+    // Protection blocks unelevated writes to it -- so something claiming
+    // that location without a Microsoft signature is a red flag worth
+    // surfacing, not a reason to hide the entry outright (unlike
+    // targetMissing/Microsoft-signed, path alone isn't proof of anything).
+    bool isUnderSystem32 = false;
 };
 
 } // namespace startup

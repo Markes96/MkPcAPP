@@ -80,6 +80,16 @@ starting a redundant second instance (and a second bridge process).
   — no need for high frame rates on a numeric dashboard.
 - **Bridge runs at `IDLE_PRIORITY_CLASS`**, sleeps between 1 Hz ticks.
 
+## App icon (`resources/`)
+
+`resources/AppIcon.ico` is compiled into the executable as a Win32 resource
+(`resources/AppIcon.rc`, added to `MkPCApp`'s sources in `CMakeLists.txt`)
+under a single ID (`IDI_APPICON`, `resources/resource.h`). Both consumers —
+the window class icon in `src/main.cpp` and the tray icon in
+`src/app/Application.cpp` — load it via `LoadIconW(instance,
+MAKEINTRESOURCEW(IDI_APPICON))` against the same `HINSTANCE` passed through
+`wWinMain`, so there's one icon asset and one ID, not a duplicated resource.
+
 ## UI shell and extensibility
 
 Navigation is a left icon sidebar (`ui::TabManager`, styled like an IDE
