@@ -74,6 +74,7 @@ set(APP_SOURCES
     src/ui/CardWidgets.cpp
     src/ui/StartupTab.cpp
     src/ui/GroupEditorDialog.cpp
+    src/ui/ConfirmDeleteGroupDialog.cpp
     src/ui/AddStartupEntryDialog.cpp
     src/ui/ConfirmDeleteDialog.cpp
     src/ui/Theme.cpp
