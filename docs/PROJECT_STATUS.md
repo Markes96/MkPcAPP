@@ -17,7 +17,7 @@
    "bug encontrado y arreglado": una vez corregido, describe el comportamiento
    actual, no la historia de cómo estaba roto.
 
-## Iteración 4 — Sección "Grupos": abrir/cerrar conjuntos de apps de un clic (en desarrollo, rama `feature/gestor-inicio`)
+## Iteración 4 — Sección "Grupos": abrir/cerrar conjuntos de apps de un clic (en desarrollo, rama `feature/grupos-lanzamiento`)
 
 Añade una cuarta sección (`ui::GroupsTab`, registrada junto a
 `HardwareMonitorTab`/`PerfilesTab`/`StartupTab` sin tocar el resto del
