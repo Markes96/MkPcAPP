@@ -201,3 +201,49 @@ por la app: `RegistryStartupControl::DeleteRunEntry` borra el valor `Run`
 al que apunta) -- ambos, en `StartupTab`, están siempre detrás de
 `ui::ConfirmDeleteDialog`, que captura su propia copia de la entrada en vez
 de una referencia viva, para que un rescan concurrente no la invalide.
+
+## Groups module (`src/groups/`)
+
+The "Grupos" tab (`ui::GroupsTab`) is the fourth section built on the
+`ITab` extension point above. Same split-responsibility shape as
+`src/profiles/`/`src/startup/`: `groups::GroupManager` owns the persisted
+list of groups (CRUD only, no process state), `groups::ProcessLifecycle`
+is a set of pure Win32 free functions (spawn, check-running,
+graceful-close-request, force-terminate) with no app-specific state, and
+`groups::GroupProcessTracker` + `groups::GroupLauncher` do the one thing
+with no earlier precedent in this app: deciding whether opening a group
+should launch a process, join an existing one, or leave a process alone
+entirely.
+
+**Why "is this path owned by another open group" is checked before "is
+it running at all".** A naive "already running -> never touch it" check
+breaks the explicit requirement that two currently-open groups can share
+an app (e.g. Discord used by both "League of Legends" and "Minecraft"):
+if group A launches Discord and group B opens later while it's still
+running, B must join as a co-owner, not treat it as untouchable -- only a
+process running for a reason `GroupProcessTracker` doesn't recognize (in
+practice: the user opened it by hand) gets the "leave it alone entirely"
+treatment. `GroupLauncher::OpenGroup` checks
+`GroupProcessTracker::IsPathCurrentlyOwned` first for exactly this
+reason; see `docs/superpowers/specs/2026-07-18-grupos-lanzamiento-design.md`
+for the full walkthrough (including the correction made to the original
+spec once this distinction was discovered while writing the
+implementation plan).
+
+**Why closing is "graceful, then forced" instead of an immediate
+`TerminateProcess`.** Windows has no generic "please close nicely" API --
+`GroupProcessTracker::ReleaseOwnership` sends `WM_CLOSE` to the process's
+own top-level windows (via `EnumWindows` filtered by owning PID) the
+moment the last owning group releases it, then schedules a
+`TerminateProcess` fallback a few ticks later (`GroupProcessTracker::Tick`,
+driven by `GroupsTab::OnTick`, the same 1 Hz background thread every
+other tab's periodic work already runs on) in case the app didn't close
+itself in time.
+
+**In-memory only, by design.** Unlike `groups::GroupManager`'s persisted
+group definitions, `GroupProcessTracker`'s ownership map and pending-close
+queue live only for the current `MkPCApp.exe` session -- see
+`docs/PROJECT_STATUS.md` for the accepted limitation this implies after a
+restart. Its destructor closes (but never terminates) any process handles
+still tracked at shutdown, so exiting MkPCApp never kills an app a group
+launched.

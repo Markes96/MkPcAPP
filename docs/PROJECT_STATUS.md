@@ -17,6 +17,73 @@
    "bug encontrado y arreglado": una vez corregido, describe el comportamiento
    actual, no la historia de cómo estaba roto.
 
+## Iteración 4 — Sección "Grupos": abrir/cerrar conjuntos de apps de un clic (en desarrollo, rama `feature/gestor-inicio`)
+
+Añade una cuarta sección (`ui::GroupsTab`, registrada junto a
+`HardwareMonitorTab`/`PerfilesTab`/`StartupTab` sin tocar el resto del
+shell) para definir grupos de apps asociadas (p. ej. un juego + Discord +
+un overlay) y abrirlas/cerrarlas todas con un clic cada una.
+
+### Qué hace
+
+- **Grupos ilimitados**, cada uno con nombre y una lista de apps
+  (cualquier `.exe`, acceso directo `.lnk`, u otro ejecutable -- sin
+  filtro de extensión en el selector de archivos, para cubrir casos como
+  Minecraft que arranca vía Java).
+- **Dos botones por grupo**, ambos manuales: "Abrir grupo" (lanza cada
+  app que no esté ya corriendo) y "Cerrar grupo" (cierra solo lo que este
+  grupo abrió). No hay detección automática de que el juego se cerró.
+- **Apps compartidas entre grupos abiertos a la vez nunca se cierran de
+  más**: si dos grupos abiertos usan la misma app (p. ej. Discord en
+  "League of Legends" y en "Minecraft"), cerrar uno de los dos la deja
+  corriendo -- solo se cierra cuando el último grupo que la reclama
+  también se cierra. Una app que el usuario ya tenía abierta antes de
+  pulsar "Abrir grupo" nunca se toca.
+- **Cierre amable, con margen**: al cerrar, se manda `WM_CLOSE` a las
+  ventanas de la app y se espera unos segundos antes de forzar el cierre
+  (`TerminateProcess`) si sigue viva.
+- **Persistencia** de la lista de grupos (nombre + apps, nunca estado de
+  ejecución) en `%LOCALAPPDATA%\MkPCApp\groups.json`, formato propio vía
+  el mismo parser JSON minimalista que ya usa "Perfiles"
+  (`platform::MiniJson`, extraído de `ProfileJson` en esta misma
+  iteración para no duplicarlo).
+
+### Limitaciones conocidas / mejor esfuerzo
+
+- **El estado "abierto/cerrado" vive solo en memoria**: si `MkPCApp.exe`
+  se reinicia mientras un grupo está "abierto", las apps que lanzó siguen
+  corriendo (nunca se cierran solas al salir de MkPCApp), pero la app ya
+  no recuerda que ese grupo estaba abierto -- hay que pulsar "Abrir" de
+  nuevo para que el conteo de propietarios vuelva a ser correcto.
+- **Sin Tareas Programadas ni URIs de launcher** (`steam://...`, etc.) en
+  esta primera iteración -- solo rutas de archivo (`.exe`/`.lnk`/
+  cualquier ejecutable) y argumentos de línea de comandos opcionales.
+
+### Arquitectura (resumen)
+
+Módulo `src/groups/` (tipos puros en `GroupTypes.h`, persistencia en
+`GroupStore`/`GroupJson`, CRUD en memoria en `GroupManager`, primitivas
+Win32 de proceso en `ProcessLifecycle`, conteo de referencias entre
+grupos en `GroupProcessTracker`, orquestación de abrir/cerrar en
+`GroupLauncher`) más `src/ui/GroupsTab` (+ `GroupEditorDialog`,
+`ConfirmDeleteGroupDialog`), siguiendo el mismo patrón de extensión por
+`ITab` que ya usan Hardware Monitor, Perfiles e Inicio. El conteo de
+referencias por ruta de ejecutable es lo único sin equivalente previo en
+la app -- ver `docs/ARCHITECTURE.md` para el detalle de por qué un grupo
+se une como copropietario en vez de relanzar cuando otro grupo abierto ya
+tiene la app corriendo.
+
+### Verificación pendiente (requiere máquina Windows real)
+
+Confirmado: compila y el ejecutable arranca sin errores. Aún sin probar
+en la máquina real del usuario: crear un grupo con varias apps y pulsar
+"Abrir grupo" las lanza todas; "Cerrar grupo" cierra solo lo que ese
+grupo abrió; una app compartida entre dos grupos abiertos sobrevive al
+cierre de uno de los dos y se cierra al cerrar el segundo; una app que el
+usuario ya tenía abierta antes de "Abrir grupo" nunca se cierra desde la
+app; el cierre amable le da tiempo a una app real a cerrarse sola antes
+de forzar; eliminar un grupo que estaba abierto cierra sus apps primero.
+
 ## Iteración 3 — Sección "Inicio": gestor de programas de arranque (en desarrollo, rama `feature/gestor-inicio`)
 
 Añade una tercera sección (`ui::StartupTab`, registrada junto a
