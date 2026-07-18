@@ -23,3 +23,6 @@ CMakeUserPresets.json
 # OS cruft
 Thumbs.db
 .DS_Store
+
+# Git worktrees
+.worktrees/
