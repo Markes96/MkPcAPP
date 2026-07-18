@@ -44,6 +44,7 @@ set(APP_SOURCES
     src/app/BridgeProcess.cpp
     src/app/AutoStart.cpp
     src/sensors/NativeSensors.cpp
+    src/platform/MiniJson.cpp
     src/profiles/ProfileJson.cpp
     src/profiles/ProfileStore.cpp
     src/profiles/ProfileManager.cpp
