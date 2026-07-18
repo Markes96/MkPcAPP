@@ -1,8 +1,18 @@
 #pragma once
 #include "StartupTypes.h"
+#include <optional>
 #include <vector>
 
 namespace startup::ShortcutStartupControl {
+
+// Resolves a .lnk's target path via IShellLinkW/IPersistFile. Requires COM
+// already initialized on the calling thread. Returns nullopt if the
+// shortcut can't be loaded/resolved at all (e.g. it points at a non-file
+// target like a folder or URL). Exposed publicly (originally private to
+// this .cpp) so groups::GroupEditorDialog can resolve a user-picked .lnk
+// the same way the Startup-folder scan below does, instead of a second
+// copy of the same IShellLinkW dance.
+std::optional<std::wstring> ResolveShortcutTarget(const std::wstring& lnkPath);
 
 // Both Enumerate* functions resolve each shortcut's target via IShellLink,
 // so they must be called with COM already initialized on the calling thread

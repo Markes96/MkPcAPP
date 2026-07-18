@@ -28,6 +28,8 @@ std::optional<std::wstring> GetKnownFolder(REFKNOWNFOLDERID folderId) {
     return result;
 }
 
+} // namespace
+
 // Resolves a .lnk's target path via IShellLinkW/IPersistFile. Requires COM
 // to already be initialized on this thread. Returns nullopt if the shortcut
 // can't be loaded/resolved at all (e.g. it points at a non-file target like
@@ -62,6 +64,8 @@ std::optional<std::wstring> ResolveShortcutTarget(const std::wstring& lnkPath) {
     shellLink->Release();
     return result;
 }
+
+namespace {
 
 void ScanLnkDirectory(const std::wstring& directory, StartupSource source, bool isDisabledSubfolder,
                        std::vector<StartupEntry>& outResult) {
