@@ -4,6 +4,17 @@
 
 namespace ui {
 
+void RenderIconPlaceholder(float size) {
+    ImGui::Dummy(ImVec2(size, size));
+    ImVec2 boxMin = ImGui::GetItemRectMin();
+    ImVec2 boxMax = ImGui::GetItemRectMax();
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRect(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_Border));
+    ImVec2 textSize = ImGui::CalcTextSize("?");
+    ImVec2 textPos(boxMin.x + (size - textSize.x) * 0.5f, boxMin.y + (size - textSize.y) * 0.5f);
+    drawList->AddText(textPos, ImGui::GetColorU32(ImGuiCol_TextDisabled), "?");
+}
+
 void CenteredText(const char* text, bool disabled) {
     float availWidth = ImGui::GetContentRegionAvail().x;
     float textWidth = ImGui::CalcTextSize(text).x;

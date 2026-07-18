@@ -9,6 +9,12 @@ namespace ui {
 // card content needs.
 constexpr float kCardWidth = 160.0f;
 
+// Drawn instead of ImGui::Image() when icon extraction failed or an
+// entry's target is missing -- degrade visibly rather than showing
+// nothing or a broken image. Shared between StartupTab and GroupsTab,
+// both of which render a resolved-exe-path icon per row/card.
+void RenderIconPlaceholder(float size);
+
 // Centers a single line of text horizontally within the current content
 // region (falls back to left-aligned if it doesn't fit). Shared between
 // PerfilesTab and StartupTab, both of which lay out fixed-size cards with

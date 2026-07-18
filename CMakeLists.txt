@@ -75,6 +75,7 @@ set(APP_SOURCES
     src/ui/StartupTab.cpp
     src/ui/GroupEditorDialog.cpp
     src/ui/ConfirmDeleteGroupDialog.cpp
+    src/ui/GroupsTab.cpp
     src/ui/AddStartupEntryDialog.cpp
     src/ui/ConfirmDeleteDialog.cpp
     src/ui/Theme.cpp

@@ -30,21 +30,6 @@ const char* SourceBadgeText(startup::StartupSource source) {
     return "";
 }
 
-// Drawn instead of ImGui::Image() when icon extraction failed or the
-// entry's target is missing -- degrade visibly rather than showing nothing
-// or a broken image, same principle the hardware monitor uses for missing
-// sensors.
-void RenderIconPlaceholder() {
-    ImGui::Dummy(ImVec2(kIconSize, kIconSize));
-    ImVec2 boxMin = ImGui::GetItemRectMin();
-    ImVec2 boxMax = ImGui::GetItemRectMax();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-    drawList->AddRect(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_Border));
-    ImVec2 textSize = ImGui::CalcTextSize("?");
-    ImVec2 textPos(boxMin.x + (kIconSize - textSize.x) * 0.5f, boxMin.y + (kIconSize - textSize.y) * 0.5f);
-    drawList->AddText(textPos, ImGui::GetColorU32(ImGuiCol_TextDisabled), "?");
-}
-
 } // namespace
 
 StartupTab::StartupTab(HWND hwnd, platform::DX11Renderer& renderer) : hwnd_(hwnd), iconCache_(renderer) {}
@@ -133,7 +118,7 @@ void StartupTab::RenderEntryRow(startup::StartupEntry& entry) {
     if (textureId != 0) {
         ImGui::Image(textureId, ImVec2(kIconSize, kIconSize));
     } else {
-        RenderIconPlaceholder();
+        RenderIconPlaceholder(kIconSize);
     }
 
     ImGui::TableSetColumnIndex(1);
