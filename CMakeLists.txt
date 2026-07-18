@@ -58,6 +58,7 @@ set(APP_SOURCES
     src/groups/GroupStore.cpp
     src/groups/GroupManager.cpp
     src/groups/ProcessLifecycle.cpp
+    src/groups/GroupProcessTracker.cpp
     src/startup/RegistryStartupControl.cpp
     src/startup/ShortcutStartupControl.cpp
     src/startup/SignatureVerifier.cpp
