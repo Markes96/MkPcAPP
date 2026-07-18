@@ -56,6 +56,7 @@ set(APP_SOURCES
     src/profiles/SystemControl/ScreenControl.cpp
     src/groups/GroupJson.cpp
     src/groups/GroupStore.cpp
+    src/groups/GroupManager.cpp
     src/startup/RegistryStartupControl.cpp
     src/startup/ShortcutStartupControl.cpp
     src/startup/SignatureVerifier.cpp
